@@ -96,25 +96,6 @@ const stats = [
                             <p class="text-xs text-cyan-600 dark:text-cyan-400">Your Journey, Our Passion</p>
                         </div>
                     </div>
-
-                    <!-- Navigation Links -->
-                    <div class="flex items-center gap-4">
-                        <Link
-                            v-if="$page.props.auth.user"
-                            href="/dashboard"
-                            class="hidden rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105 sm:inline-block"
-                        >
-                            Dashboard
-                        </Link>
-                        <template v-else>
-                            <Link
-                                href="/login"
-                                class="rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
-                            >
-                                Log in
-                            </Link>
-                        </template>
-                    </div>
                 </div>
             </nav>
         </header>
@@ -144,10 +125,10 @@ const stats = [
                     <!-- CTA Buttons -->
                     <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
                         <Link
-                            href="/login"
+                            href="#"
                             class="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 px-8 py-4 text-lg font-bold text-white shadow-2xl transition-all duration-300 hover:shadow-cyan-500/50 hover:scale-105"
                         >
-                            <span>Access Dashboard</span>
+                            <span>Get Started</span>
                             <svg class="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                             </svg>
@@ -266,10 +247,10 @@ const stats = [
                         </p>
                         <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
                             <Link
-                                href="/login"
+                                href="#"
                                 class="inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 text-lg font-bold text-cyan-600 shadow-xl transition-all duration-300 hover:shadow-2xl hover:scale-105"
                             >
-                                <span>Login Now</span>
+                                <span>Get Started Now</span>
                                 <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>

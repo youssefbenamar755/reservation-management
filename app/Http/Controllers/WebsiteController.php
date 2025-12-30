@@ -312,30 +312,46 @@ class WebsiteController extends Controller
         $endpoint = "{$baseUrl}/wp-json/wc/v3/orders";
 
         try {
-            $response = Http::timeout(20)
-                ->acceptJson()
-                ->get($endpoint, [
-                    'consumer_key' => $website->wc_consumer_key,
-                    'consumer_secret' => $website->wc_consumer_secret,
-                    'per_page' => $perPage,
-                    'orderby' => 'date',
-                    'order' => 'desc',
-                ]);
+            $allOrders = [];
+            $page = 1;
+            $totalPages = 1;
 
-            if (! $response->successful()) {
-                $status = $response->status();
-                $message = data_get($response->json(), 'message') ?? $response->body();
-                return ['status' => 'error', 'message' => "WooCommerce sync failed (HTTP {$status}). {$message}"];
-            }
+            // Fetch all pages of orders
+            do {
+                $response = Http::timeout(20)
+                    ->acceptJson()
+                    ->get($endpoint, [
+                        'consumer_key' => $website->wc_consumer_key,
+                        'consumer_secret' => $website->wc_consumer_secret,
+                        'per_page' => $perPage,
+                        'page' => $page,
+                        'orderby' => 'date',
+                        'order' => 'desc',
+                    ]);
 
-            $orders = $response->json();
-            if (! is_array($orders)) {
-                return ['status' => 'error', 'message' => 'WooCommerce sync failed: unexpected response format.'];
-            }
+                if (! $response->successful()) {
+                    $status = $response->status();
+                    $message = data_get($response->json(), 'message') ?? $response->body();
+                    return ['status' => 'error', 'message' => "WooCommerce sync failed (HTTP {$status}). {$message}"];
+                }
+
+                $orders = $response->json();
+                if (! is_array($orders)) {
+                    return ['status' => 'error', 'message' => 'WooCommerce sync failed: unexpected response format.'];
+                }
+
+                // Merge orders from this page
+                $allOrders = array_merge($allOrders, $orders);
+
+                // Get total pages from response headers (WooCommerce provides X-WP-TotalPages)
+                $totalPages = (int) $response->header('X-WP-TotalPages', 1);
+
+                $page++;
+            } while ($page <= $totalPages && count($orders) > 0);
 
             $synced = 0;
 
-            foreach ($orders as $order) {
+            foreach ($allOrders as $order) {
                 $wpOrderId = data_get($order, 'id');
                 if (! $wpOrderId) {
                     continue;
