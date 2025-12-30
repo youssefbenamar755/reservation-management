@@ -1,0 +1,791 @@
+﻿
+   PASS  Tests\Unit\ExampleTest
+  Γ£ô that trueΓÇª 0.02s  
+
+   FAIL  Tests\Feature\Auth\AuthenticationTest
+  Γ¿» login screen can be rendered
+  Γ¿» users can authenticate using the login screen
+  Γ¿» users with two factor enabled are redirected to two factor challenge
+  Γ¿» users can not authenticate with invalid password
+  Γ¿» users can logout
+  Γ¿» users are rate limited
+
+   FAIL  Tests\Feature\Auth\EmailVerificationTest
+  Γ¿» email verification screen can be rendered
+  Γ¿» email can be verified
+  Γ¿» email is not verified with invalid hash
+  Γ¿» email is not verified with invalid user id
+  Γ¿» verified user is redirected to dashboard from verification prompt
+  Γ¿» already verified user visiting verification link is redirected without firing event again
+
+   FAIL  Tests\Feature\Auth\PasswordConfirmationTest
+  Γ¿» confirm password screen can be rendered
+  Γ¿» password confirmation requires authentication
+
+   FAIL  Tests\Feature\Auth\PasswordResetTest
+  Γ¿» reset password link screen can be rendered
+  Γ¿» reset password link can be requested
+  Γ¿» reset password screen can be rendered
+  Γ¿» password can be reset with valid token
+  Γ¿» password cannot be reset with invalid token
+
+   FAIL  Tests\Feature\Auth\RegistrationTest
+  Γ¿» registration screen can be rendered
+  Γ¿» new users can register
+
+   FAIL  Tests\Feature\Auth\TwoFactorChallengeTest
+  Γ¿» two factor challenge redirects to login when not authenticated
+  Γ¿» two factor challenge can be rendered
+
+   FAIL  Tests\Feature\Auth\VerificationNotificationTest
+  Γ¿» sends verification notification
+  Γ¿» does not send verification notification if email is verified
+
+   FAIL  Tests\Feature\DashboardTest
+  Γ¿» guests are redirected to the login page
+  Γ¿» authenticated users can visit the dashboard
+
+   FAIL  Tests\Feature\ExampleTest
+  Γ¿» returns a successful response
+
+   FAIL  Tests\Feature\Settings\PasswordUpdateTest
+  Γ¿» password update page is displayed
+  Γ¿» password can be updated
+  Γ¿» correct password must be provided to update password
+
+   FAIL  Tests\Feature\Settings\ProfileUpdateTest
+  Γ¿» profile page is displayed
+  Γ¿» profile information can be updated
+  Γ¿» email verification status is unchanged when the email address is unchanged
+  Γ¿» user can delete their account
+  Γ¿» correct password must be provided to delete account
+
+   FAIL  Tests\Feature\Settings\TwoFactorAuthenticationTest
+  Γ¿» two factor settings page can be rendered
+  Γ¿» two factor settings page requires password confirmation when enabled
+  Γ¿» two factor settings page does not requires password confirmation when disabled
+  Γ¿» two factor settings page returns forbidden response when two factor is disabled
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+  ΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 near "CHANGE": syntax error (Connection: sqlite, SQL: ALTER TABLE ff_submissions CHANGE amadeus_code amadeus_command_block TEXT NULL)
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+    560Γûò             if ($this->pretending()) {
+    561Γûò                 return true;
+    562Γûò             }
+    563Γûò 
+  Γ₧£ 564Γûò             $statement = $this->getPdo()->prepare($query);
+    565Γûò 
+    566Γûò             $this->bindValues($statement, $this->prepareBindings($bindings));
+    567Γûò 
+    568Γûò             $this->recordsHaveBeenModified();
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:564
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:813
+
+
+  Tests:    40 failed, 1 passed (1 assertions)
+  Duration: 2.54s
+
