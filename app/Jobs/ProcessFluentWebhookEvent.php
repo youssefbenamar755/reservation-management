@@ -24,8 +24,9 @@ class ProcessFluentWebhookEvent implements ShouldQueue
         $event = WebhookEvent::findOrFail($this->webhookEventId);
         $payload = $event->payload;
 
-        // Normalize payload: unwrap array if needed
-        if (is_array($payload) && isset($payload[0]) && is_array($payload[0])) {
+        // Normalize payload: if payload is a list array (starts with [0]), use payload[0]
+        if (is_array($payload) && !empty($payload) && array_is_list($payload)) {
+            // It's a list array, use the first element
             $payload = $payload[0];
         }
 
@@ -87,6 +88,39 @@ class ProcessFluentWebhookEvent implements ShouldQueue
         $email = $response['email'] ?? $meta['submission']['email'] ?? null;
         $createdAt = $meta['submission']['created_at'] ?? $response['created_at'] ?? now();
 
+        // Extract payment_status from __submission.payment_status
+        $paymentStatus = $meta['submission']['payment_status'] ?? null;
+
+        // Extract amount from multiple possible locations
+        $amount = null;
+        
+        // First try: __submission.payment_total (likely in cents)
+        if (isset($meta['submission']['payment_total'])) {
+            $paymentTotal = $meta['submission']['payment_total'];
+            $numAmount = is_numeric($paymentTotal) ? (float) $paymentTotal : null;
+            if ($numAmount !== null && $numAmount > 0) {
+                // Convert from cents to dollars
+                $amount = $numAmount / 100;
+            }
+        }
+        
+        // Second try: __order_items[0].formatted_line_total or formatted_item_price (formatted string like "$25.00")
+        if ($amount === null && !empty($orderItems) && is_array($orderItems) && isset($orderItems[0])) {
+            $firstItem = $orderItems[0];
+            $formattedAmount = $firstItem['formatted_line_total'] ?? $firstItem['formatted_item_price'] ?? null;
+            
+            if ($formattedAmount && is_string($formattedAmount)) {
+                // Remove currency symbols and commas, then parse
+                $cleaned = preg_replace('/[^\d.]/', '', $formattedAmount);
+                $numAmount = is_numeric($cleaned) ? (float) $cleaned : null;
+                if ($numAmount !== null && $numAmount > 0) {
+                    $amount = $numAmount;
+                }
+            } elseif ($formattedAmount && is_numeric($formattedAmount)) {
+                $amount = (float) $formattedAmount;
+            }
+        }
+
         // Auto-sync form schema if not already synced
         $website = $event->website;
         if ($website) {
@@ -102,6 +136,8 @@ class ProcessFluentWebhookEvent implements ShouldQueue
             ],
             [
                 'email' => $email,
+                'payment_status' => $paymentStatus,
+                'amount' => $amount,
                 'created_at_wp' => $createdAt,
                 'payload' => $finalPayload,
             ]

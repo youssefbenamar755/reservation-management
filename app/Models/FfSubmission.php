@@ -11,6 +11,8 @@ class FfSubmission extends Model
         'form_id',
         'entry_id',
         'email',
+        'payment_status',
+        'amount',
         'created_at_wp',
         'payload',
         'amadeus_command_block',
@@ -23,6 +25,7 @@ class FfSubmission extends Model
 
     protected $casts = [
         'payload' => 'array', // CRITICAL: Cast JSON to array so payload['response'] is accessible
+        'amount' => 'decimal:2',
         'created_at_wp' => 'datetime',
         'amadeus_generated_at' => 'datetime',
         'pnr_generated_at' => 'datetime',

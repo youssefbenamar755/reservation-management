@@ -140,16 +140,23 @@ function getEntryEmail(entry: any): string | null {
 
 // Extract payment status from entry
 function getPaymentStatus(entry: any): string | null {
+  // First check top-level payment_status field (from database)
+  if (entry.payment_status && typeof entry.payment_status === 'string') {
+    return entry.payment_status.trim()
+  }
+  
+  // Fallback to payload parsing for backwards compatibility
   if (!entry.payload || typeof entry.payload !== 'object') {
     return null
   }
   
   const payload = entry.payload
   
-  // Check common payment status locations
+  // Check common payment status locations in payload
   const status = payload.payment_status 
     ?? payload.status 
     ?? payload.paymentStatus
+    ?? payload.meta?.submission?.payment_status
     ?? payload.response?.payment_status
     ?? payload.response?.status
     ?? null
@@ -163,6 +170,15 @@ function getPaymentStatus(entry: any): string | null {
 
 // Extract payment amount from entry
 function getPaymentAmount(entry: any): string | null {
+  // First check top-level amount field (from database, already in dollars)
+  if (entry.amount !== null && entry.amount !== undefined) {
+    const numAmount = typeof entry.amount === 'string' ? parseFloat(entry.amount) : Number(entry.amount)
+    if (!isNaN(numAmount) && numAmount > 0) {
+      return numAmount.toFixed(2)
+    }
+  }
+  
+  // Fallback to payload parsing for backwards compatibility
   if (!entry.payload || typeof entry.payload !== 'object') {
     return null
   }
@@ -171,6 +187,7 @@ function getPaymentAmount(entry: any): string | null {
   
   // Check payment_total first (stored in cents, e.g., 2500 = $25.00)
   const paymentTotal = payload.payment_total 
+    ?? payload.meta?.submission?.payment_total
     ?? payload.response?.payment_total
     ?? null
   
@@ -180,6 +197,20 @@ function getPaymentAmount(entry: any): string | null {
     if (!isNaN(numAmount) && numAmount > 0) {
       // Divide by 100 to convert cents to dollars
       return (numAmount / 100).toFixed(2)
+    }
+  }
+  
+  // Check order_items for formatted amounts
+  if (payload.order_items && Array.isArray(payload.order_items) && payload.order_items.length > 0) {
+    const firstItem = payload.order_items[0]
+    const formattedAmount = firstItem?.formatted_line_total ?? firstItem?.formatted_item_price
+    if (formattedAmount && typeof formattedAmount === 'string') {
+      // Remove currency symbols and commas, then parse
+      const cleaned = formattedAmount.replace(/[^\d.]/g, '')
+      const numAmount = parseFloat(cleaned)
+      if (!isNaN(numAmount) && numAmount > 0) {
+        return numAmount.toFixed(2)
+      }
     }
   }
   
