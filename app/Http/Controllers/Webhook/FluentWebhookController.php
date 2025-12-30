@@ -36,7 +36,7 @@ class FluentWebhookController extends Controller
             'received_at' => now(),
         ]);
         
-        ProcessFluentWebhookEvent::dispatch($event->id);
+        ProcessFluentWebhookEvent::dispatchSync($event->id);
 
         $website->update([
             'last_webhook_at' => now(),

@@ -44,7 +44,7 @@ class WooWebhookController extends Controller
         ]);
         
         // Dispatch job to process the webhook asynchronously
-        ProcessWooWebhookEvent::dispatch($event->id);
+        ProcessWooWebhookEvent::dispatchSync($event->id);
 
         // Track last webhook time (useful for monitoring)
         $website->update([
