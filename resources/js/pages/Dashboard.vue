@@ -220,6 +220,7 @@ function getStatusColor(status: string): string {
             <TrendingUp class="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
+            <p class="mb-3 text-xs text-muted-foreground">This month</p>
             <div class="space-y-2">
               <div
                 v-for="(count, status) in ordersByStatus"
@@ -239,6 +240,7 @@ function getStatusColor(status: string): string {
             <Globe class="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
+            <p class="mb-3 text-xs text-muted-foreground">This month</p>
             <div class="space-y-2">
               <div
                 v-for="website in ordersByWebsite.slice(0, 5)"
@@ -369,7 +371,12 @@ function getStatusColor(status: string): string {
               >
                 <div class="flex-1">
                   <div class="font-medium">
-                    Entry #{{ submission.entry_id }}
+                    <Link
+                      :href="`/submissions/entries/${submission.id}`"
+                      class="hover:underline"
+                    >
+                      Entry #{{ submission.entry_id }}
+                    </Link>
                   </div>
                   <p class="text-sm text-muted-foreground">
                     {{ submission.website_name }}

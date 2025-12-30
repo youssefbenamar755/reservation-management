@@ -31,16 +31,18 @@ class DashboardController extends Controller
             'failed_webhooks' => WebhookEvent::where('status', 'failed')->count(),
         ];
 
-        // Orders by Status
+        // Orders by Status (This Month)
         $ordersByStatus = WcOrder::select('status', DB::raw('count(*) as count'))
+            ->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])
             ->groupBy('status')
             ->get()
             ->pluck('count', 'status')
             ->toArray();
 
-        // Orders by Website
+        // Orders by Website (This Month)
         $ordersByWebsite = WcOrder::select('websites.name', DB::raw('count(wc_orders.id) as count'))
             ->join('websites', 'wc_orders.website_id', '=', 'websites.id')
+            ->whereBetween('wc_orders.created_at_wp', [$startOfMonth, $endOfMonth])
             ->groupBy('websites.id', 'websites.name')
             ->orderByDesc('count')
             ->limit(10)
