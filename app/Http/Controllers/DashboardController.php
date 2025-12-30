@@ -14,13 +14,19 @@ class DashboardController extends Controller
 {
     public function __invoke(Request $request)
     {
+        // Get start and end of current month
+        $startOfMonth = now()->startOfMonth();
+        $endOfMonth = now()->endOfMonth();
+
         // Overall Statistics
         $stats = [
             'total_websites' => Website::count(),
             'active_websites' => Website::where('status', 'active')->count(),
-            'total_orders' => WcOrder::count(),
-            'total_submissions' => FfSubmission::count(),
-            'total_revenue' => WcOrder::where('status', 'completed')->sum('total'),
+            'total_orders' => WcOrder::whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
+            'total_submissions' => FfSubmission::whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
+            'total_revenue' => WcOrder::where('status', 'completed')
+                ->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])
+                ->sum('total'),
             'pending_webhooks' => WebhookEvent::where('status', 'queued')->count(),
             'failed_webhooks' => WebhookEvent::where('status', 'failed')->count(),
         ];

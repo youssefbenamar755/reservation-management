@@ -146,7 +146,7 @@ function getStatusColor(status: string): string {
           <CardContent>
             <div class="text-2xl font-bold">{{ stats.total_orders.toLocaleString() }}</div>
             <p class="text-xs text-muted-foreground">
-              Across all websites
+              This month
             </p>
           </CardContent>
         </Card>
@@ -159,7 +159,7 @@ function getStatusColor(status: string): string {
           <CardContent>
             <div class="text-2xl font-bold">{{ stats.total_submissions.toLocaleString() }}</div>
             <p class="text-xs text-muted-foreground">
-              Fluent Forms entries
+              This month
             </p>
           </CardContent>
         </Card>
@@ -174,7 +174,7 @@ function getStatusColor(status: string): string {
               {{ formatCurrency(stats.total_revenue) }}
             </div>
             <p class="text-xs text-muted-foreground">
-              Completed orders only
+              This month
             </p>
           </CardContent>
         </Card>
