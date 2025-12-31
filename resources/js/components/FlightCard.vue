@@ -303,15 +303,15 @@ const fareInfo = computed(() => {
               class="space-y-6"
             >
               <!-- Flight Route -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8 items-center">
                 <!-- Departure -->
                 <div class="space-y-2">
                   <p class="text-sm font-medium text-muted-foreground">Departure</p>
                   <div class="space-y-1">
-                    <div class="text-3xl font-bold">{{ formatDateTime(segment.departure?.at || '').time }}</div>
-                    <div class="text-xl font-semibold">{{ segment.departure?.iataCode || '—' }}</div>
-                    <div class="text-base text-muted-foreground">{{ getAirportCity(segment.departure?.iataCode || '') }}</div>
-                    <div class="text-sm text-muted-foreground mt-2">
+                    <div class="text-2xl sm:text-3xl font-bold">{{ formatDateTime(segment.departure?.at || '').time }}</div>
+                    <div class="text-lg sm:text-xl font-semibold">{{ segment.departure?.iataCode || '—' }}</div>
+                    <div class="text-sm sm:text-base text-muted-foreground">{{ getAirportCity(segment.departure?.iataCode || '') }}</div>
+                    <div class="text-xs sm:text-sm text-muted-foreground mt-2">
                       {{ formatDateTime(segment.departure?.at || '').date }}
                       <span v-if="segment.departure?.terminal" class="ml-2">Terminal {{ segment.departure.terminal }}</span>
                     </div>
@@ -323,13 +323,13 @@ const fareInfo = computed(() => {
                   <div class="flex items-center gap-3 w-full">
                     <div class="flex-1 h-0.5 bg-border"></div>
                     <div class="flex flex-col items-center gap-1">
-                      <Plane class="h-5 w-5 text-primary" />
+                      <Plane class="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
                       <span class="text-xs font-medium text-muted-foreground">{{ formatDuration(segment.duration || '') }}</span>
                     </div>
                     <div class="flex-1 h-0.5 bg-border"></div>
                   </div>
                   <div class="text-center space-y-1">
-                    <p class="text-sm font-medium">{{ segment.carrierCode }} {{ segment.number }}</p>
+                    <p class="text-xs sm:text-sm font-medium">{{ segment.carrierCode }} {{ segment.number }}</p>
                     <p class="text-xs text-muted-foreground">
                       <span v-if="segment.numberOfStops === 0">Non-stop flight</span>
                       <span v-else>{{ segment.numberOfStops }} {{ segment.numberOfStops === 1 ? 'stop' : 'stops' }}</span>
@@ -338,13 +338,13 @@ const fareInfo = computed(() => {
                 </div>
 
                 <!-- Arrival -->
-                <div class="space-y-2 md:text-right">
+                <div class="space-y-2 text-left md:text-right">
                   <p class="text-sm font-medium text-muted-foreground">Arrival</p>
                   <div class="space-y-1">
-                    <div class="text-3xl font-bold">{{ formatDateTime(segment.arrival?.at || '').time }}</div>
-                    <div class="text-xl font-semibold">{{ segment.arrival?.iataCode || '—' }}</div>
-                    <div class="text-base text-muted-foreground">{{ getAirportCity(segment.arrival?.iataCode || '') }}</div>
-                    <div class="text-sm text-muted-foreground mt-2 md:text-right">
+                    <div class="text-2xl sm:text-3xl font-bold">{{ formatDateTime(segment.arrival?.at || '').time }}</div>
+                    <div class="text-lg sm:text-xl font-semibold">{{ segment.arrival?.iataCode || '—' }}</div>
+                    <div class="text-sm sm:text-base text-muted-foreground">{{ getAirportCity(segment.arrival?.iataCode || '') }}</div>
+                    <div class="text-xs sm:text-sm text-muted-foreground mt-2 text-left md:text-right">
                       {{ formatDateTime(segment.arrival?.at || '').date }}
                       <span v-if="segment.arrival?.terminal" class="ml-2">Terminal {{ segment.arrival.terminal }}</span>
                     </div>
@@ -364,7 +364,7 @@ const fareInfo = computed(() => {
         </template>
               <!-- Flight Details -->
               <div class="pt-6 border-t">
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
             <div class="text-center md:text-left">
               <p class="text-sm text-muted-foreground mb-2">Airline</p>
               <p class="text-base font-semibold">
