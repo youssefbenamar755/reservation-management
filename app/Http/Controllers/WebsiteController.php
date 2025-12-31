@@ -357,6 +357,14 @@ class WebsiteController extends Controller
                     continue;
                 }
 
+                // Extract payment status (same logic as ProcessWooWebhookEvent)
+                $paymentStatus = null;
+                if (isset($order['payment_status'])) {
+                    $paymentStatus = $order['payment_status'];
+                } elseif (!empty(data_get($order, 'date_paid'))) {
+                    $paymentStatus = 'paid';
+                }
+
                 WcOrder::updateOrCreate(
                     [
                         'website_id' => $website->id,
@@ -364,6 +372,7 @@ class WebsiteController extends Controller
                     ],
                     [
                         'status' => data_get($order, 'status', 'unknown'),
+                        'payment_status' => $paymentStatus,
                         'currency' => data_get($order, 'currency'),
                         'total' => (string) data_get($order, 'total', '0'),
                         'customer_email' => data_get($order, 'billing.email'),

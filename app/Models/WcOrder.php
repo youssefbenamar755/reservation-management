@@ -10,6 +10,7 @@ class WcOrder extends Model
         'website_id',
         'wp_order_id',
         'status',
+        'payment_status',
         'currency',
         'total',
         'customer_email',

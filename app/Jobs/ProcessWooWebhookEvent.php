@@ -27,7 +27,12 @@ class ProcessWooWebhookEvent implements ShouldQueue
             throw new \Exception('Missing order ID in webhook payload');
         }
 
-        // Upsert Woo order
+        // Determine payment status
+        // WooCommerce may have payment_status field directly, or we derive it from date_paid
+        $paymentStatus = $this->extractPaymentStatus($payload);
+
+        // Upsert Woo order - handles both order.created and order.updated
+        // Uses updateOrCreate to ensure idempotency (no duplicates)
         WcOrder::updateOrCreate(
             [
                 'website_id' => $event->website_id,
@@ -35,6 +40,7 @@ class ProcessWooWebhookEvent implements ShouldQueue
             ],
             [
                 'status' => $payload['status'] ?? 'unknown',
+                'payment_status' => $paymentStatus,
                 'currency' => $payload['currency'] ?? null,
                 'total' => $payload['total'] ?? 0,
                 'customer_email' => data_get($payload, 'billing.email'),
@@ -53,6 +59,41 @@ class ProcessWooWebhookEvent implements ShouldQueue
             'status' => 'processed',
             'processed_at' => now(),
         ]);
+    }
+
+    /**
+     * Extract payment status from WooCommerce order payload.
+     * 
+     * WooCommerce doesn't have a direct payment_status field in standard API,
+     * but we can derive it from date_paid or use payment_status if available.
+     * 
+     * @param array $payload
+     * @return string|null
+     */
+    private function extractPaymentStatus(array $payload): ?string
+    {
+        // First, check if payment_status field exists directly
+        if (isset($payload['payment_status'])) {
+            return $payload['payment_status'];
+        }
+
+        // Derive from date_paid: if date_paid exists and is not empty, order is paid
+        $datePaid = data_get($payload, 'date_paid');
+        if (!empty($datePaid)) {
+            return 'paid';
+        }
+
+        // If date_paid is null/empty, check order status
+        // Some orders might be marked as paid through status
+        $status = data_get($payload, 'status', '');
+        if (in_array($status, ['completed', 'processing'])) {
+            // These statuses typically indicate payment, but not always
+            // Return null to indicate unknown payment status
+            return null;
+        }
+
+        // Default to null if we can't determine
+        return null;
     }
 
     public function failed(Throwable $e): void
