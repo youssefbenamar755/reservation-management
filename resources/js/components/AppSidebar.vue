@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FileText, Folder, Globe, LayoutGrid, ShoppingCart, TrendingUp } from 'lucide-vue-next';
+import { BookOpen, FileText, Folder, Globe, LayoutGrid, ShoppingCart, TrendingUp, Users } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const mainNavItems: NavItem[] = [
@@ -36,6 +36,11 @@ const mainNavItems: NavItem[] = [
         title: 'Orders',
         href: '/orders',
         icon: ShoppingCart,
+    },
+    {
+        title: 'Customers',
+        href: '/customers',
+        icon: Users,
     },
     {
         title: 'Submissions',

@@ -8,6 +8,7 @@ use App\Http\Controllers\FfSubmissionController;
 use App\Http\Controllers\WebsiteController;
 use App\Http\Controllers\WcOrderController;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\CustomersController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -35,6 +36,8 @@ Route::middleware(['auth'])->group(function () {
 });
 Route::middleware(['auth'])->group(function () {
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
+    Route::get('/customers', [CustomersController::class, 'index'])->name('customers.index');
+    Route::get('/customers/{email}', [CustomersController::class, 'show'])->name('customers.show');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
     Route::put('/orders/{order}', [WcOrderController::class, 'update'])->name('orders.update');
