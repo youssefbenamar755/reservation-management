@@ -283,6 +283,30 @@ const formFieldsPreview = computed(() => {
     })
   }
 
+  // Sort fields: flight from first, then flight to, then the rest
+  fields.sort((a, b) => {
+    const aKeyLower = a.key.toLowerCase()
+    const aLabelLower = a.label.toLowerCase()
+    const bKeyLower = b.key.toLowerCase()
+    const bLabelLower = b.label.toLowerCase()
+    
+    const aIsFlightFrom = aKeyLower.includes('flight_from') || aLabelLower.includes('flight from')
+    const aIsFlightTo = aKeyLower.includes('flight_to') || aLabelLower.includes('flight to')
+    const bIsFlightFrom = bKeyLower.includes('flight_from') || bLabelLower.includes('flight from')
+    const bIsFlightTo = bKeyLower.includes('flight_to') || bLabelLower.includes('flight to')
+    
+    // Flight from comes first
+    if (aIsFlightFrom && !bIsFlightFrom) return -1
+    if (!aIsFlightFrom && bIsFlightFrom) return 1
+    
+    // Flight to comes second (after flight from)
+    if (aIsFlightTo && !bIsFlightTo && !bIsFlightFrom) return -1
+    if (!aIsFlightTo && bIsFlightTo && !aIsFlightFrom) return 1
+    
+    // Keep original order for other fields
+    return 0
+  })
+
   return fields
 })
 
