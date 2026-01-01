@@ -184,21 +184,27 @@ function formatHour(hour: number): string {
             <!-- Date Range -->
             <div class="space-y-2">
               <Label for="start_date">Start Date</Label>
-              <input
-                id="start_date"
-                v-model="startDate"
-                type="date"
-                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              />
+              <div class="relative">
+                <input
+                  id="start_date"
+                  v-model="startDate"
+                  type="date"
+                  class="date-input-with-icon flex h-10 w-full rounded-md border border-input bg-background pl-3 pr-10 py-2 text-sm cursor-pointer"
+                />
+                <Calendar class="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
             </div>
             <div class="space-y-2">
               <Label for="end_date">End Date</Label>
-              <input
-                id="end_date"
-                v-model="endDate"
-                type="date"
-                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              />
+              <div class="relative">
+                <input
+                  id="end_date"
+                  v-model="endDate"
+                  type="date"
+                  class="date-input-with-icon flex h-10 w-full rounded-md border border-input bg-background pl-3 pr-10 py-2 text-sm cursor-pointer"
+                />
+                <Calendar class="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
             </div>
 
             <!-- Order Status -->
@@ -688,4 +694,31 @@ function formatHour(hour: number): string {
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+.date-input-with-icon {
+  cursor: pointer;
+}
+
+.date-input-with-icon::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.date-input-with-icon::-moz-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.date-input-with-icon::-ms-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+}
+</style>
 

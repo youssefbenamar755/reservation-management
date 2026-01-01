@@ -70,6 +70,38 @@ class AnalyticsController extends Controller
 
     public function index(Request $request)
     {
+        // Generate cache key based on filters
+        $cacheKey = $this->getCacheKey($request);
+        
+        // Cache expensive calculations for 5 minutes
+        // Cache the data array, then render with Inertia
+        $data = Cache::remember($cacheKey, 300, function () use ($request) {
+            return $this->calculateAnalyticsData($request);
+        });
+        
+        return Inertia::render('Analytics', $data);
+    }
+
+    /**
+     * Generate cache key from request filters
+     */
+    private function getCacheKey(Request $request): string
+    {
+        $filters = [
+            'start_date' => $request->input('start_date', 'default'),
+            'end_date' => $request->input('end_date', 'default'),
+            'website_ids' => $request->input('website_ids', []),
+            'payment_status' => $request->input('payment_status', 'all'),
+        ];
+        
+        return 'analytics:' . md5(json_encode($filters));
+    }
+
+    /**
+     * Calculate analytics data
+     */
+    private function calculateAnalyticsData(Request $request): array
+    {
         // Parse date range filters
         $startDate = $request->input('start_date') 
             ? Carbon::parse($request->input('start_date'))->startOfDay()
@@ -79,58 +111,50 @@ class AnalyticsController extends Controller
             ? Carbon::parse($request->input('end_date'))->endOfDay()
             : now()->endOfDay();
 
+        // Build filter closure to reuse
+        $applyFilters = function ($query) use ($request) {
+            return $query
+                ->when($request->filled('website_ids'), function ($q) use ($request) {
+                    $websiteIds = is_array($request->website_ids) 
+                        ? $request->website_ids 
+                        : explode(',', $request->website_ids);
+                    $websiteIds = array_map('intval', $websiteIds);
+                    $q->whereIn('website_id', $websiteIds);
+                })
+                ->when($request->filled('payment_status'), function ($q) use ($request) {
+                    $q->where('status', $request->payment_status);
+                });
+        };
+
         // Base query with filters
         $baseQuery = WcOrder::query()
-            ->whereBetween('created_at_wp', [$startDate, $endDate])
-            ->when($request->filled('website_ids'), function ($query) use ($request) {
-                $websiteIds = is_array($request->website_ids) 
-                    ? $request->website_ids 
-                    : explode(',', $request->website_ids);
-                $websiteIds = array_map('intval', $websiteIds);
-                $query->whereIn('website_id', $websiteIds);
-            })
-            ->when($request->filled('payment_status'), function ($query) use ($request) {
-                $query->where('status', $request->payment_status);
-            });
+            ->whereBetween('created_at_wp', [$startDate, $endDate]);
+        
+        $baseQuery = $applyFilters($baseQuery);
 
-        // Total Revenue (aggregated)
-        $totalRevenue = (float) (clone $baseQuery)
+        // Combined stats query - get multiple metrics in one query
+        $statsQuery = (clone $baseQuery)
+            ->select(
+                DB::raw('COUNT(*) as total_orders'),
+                DB::raw('SUM(CASE WHEN status = "completed" THEN 1 ELSE 0 END) as paid_orders'),
+                DB::raw('SUM(CASE WHEN status = "completed" THEN total ELSE 0 END) as total_revenue')
+            )
+            ->first();
+
+        $totalOrders = (int) ($statsQuery->total_orders ?? 0);
+        $paidOrders = (int) ($statsQuery->paid_orders ?? 0);
+        $totalRevenue = (float) ($statsQuery->total_revenue ?? 0);
+
+        // PayPal Fees - optimized to only select payload column and process in chunks
+        $paypalFees = 0;
+        (clone $baseQuery)
             ->where('status', 'completed')
-            ->sum('total');
-
-        // Total Orders (aggregated)
-        $totalOrders = (clone $baseQuery)->count();
-
-        // Paid Orders (aggregated) - completed orders
-        $paidOrders = (clone $baseQuery)
-            ->where('status', 'completed')
-            ->count();
-
-        // PayPal Fees (extracted from meta_data) - only for completed orders
-        // Path: meta_data[] -> where key == "_ppcp_paypal_fees" -> value.paypal_fee.value
-        $paypalFees = (clone $baseQuery)
-            ->where('status', 'completed')
-            ->get()
-            ->sum(function ($order) {
-                $payload = $order->payload ?? [];
-                $metaData = $payload['meta_data'] ?? [];
-                
-                // Search for _ppcp_paypal_fees in meta_data
-                foreach ($metaData as $meta) {
-                    if (isset($meta['key']) && $meta['key'] === '_ppcp_paypal_fees') {
-                        // Extract value.paypal_fee.value
-                        $value = $meta['value'] ?? null;
-                        if (is_array($value) && isset($value['paypal_fee']['value'])) {
-                            $paypalFeeValue = $value['paypal_fee']['value'];
-                            if ($paypalFeeValue !== null && $paypalFeeValue !== '') {
-                                return is_numeric($paypalFeeValue) ? (float) $paypalFeeValue : 0;
-                            }
-                        }
-                        break;
-                    }
+            ->select('id', 'payload')
+            ->chunk(100, function ($orders) use (&$paypalFees) {
+                foreach ($orders as $order) {
+                    $fee = $this->extractPaypalFee($order->payload ?? []);
+                    $paypalFees += $fee;
                 }
-                
-                return 0;
             });
 
         // Revenue Over Time (aggregated by date)
@@ -146,7 +170,8 @@ class AnalyticsController extends Controller
             ->map(fn ($item) => [
                 'date' => $item->date,
                 'revenue' => (float) $item->revenue,
-            ]);
+            ])
+            ->toArray();
 
         // Orders Over Time (aggregated by date)
         $ordersOverTime = (clone $baseQuery)
@@ -160,7 +185,8 @@ class AnalyticsController extends Controller
             ->map(fn ($item) => [
                 'date' => $item->date,
                 'count' => (int) $item->count,
-            ]);
+            ])
+            ->toArray();
 
         // Revenue by Website (aggregated)
         $revenueByWebsite = (clone $baseQuery)
@@ -178,45 +204,33 @@ class AnalyticsController extends Controller
                 'id' => $item->id,
                 'name' => $item->name,
                 'revenue' => (float) $item->revenue,
-            ]);
+            ])
+            ->toArray();
 
-        // Orders by Country (aggregated)
-        $ordersByCountry = (clone $baseQuery)
-            ->get()
-            ->map(function ($order) {
-                $payload = $order->payload ?? [];
-                
-                // First try to get country from billing address
-                $country = data_get($payload, 'billing.country');
-                
-                // If no country in billing, try to get from IP address
-                if (empty($country)) {
-                    $ip = $this->extractIpFromPayload($payload);
-                    if ($ip) {
-                        $country = $this->getCountryFromIp($ip);
+        // Orders by Country - optimized to only select payload and process in chunks
+        $countryOrders = [];
+        (clone $baseQuery)
+            ->select('id', 'payload')
+            ->chunk(100, function ($orders) use (&$countryOrders) {
+                foreach ($orders as $order) {
+                    $country = $this->extractCountryFromPayload($order->payload ?? []);
+                    if (!empty($country)) {
+                        $countryOrders[$country] = ($countryOrders[$country] ?? 0) + 1;
                     }
                 }
-                
+            });
+
+        arsort($countryOrders);
+        $ordersByCountry = collect($countryOrders)
+            ->take(20)
+            ->map(function ($count, $country) {
                 return [
                     'country' => $country,
-                    'order_id' => $order->id,
-                ];
-            })
-            ->filter(function ($item) {
-                // Filter out orders without a country (null, empty string, etc.)
-                return !empty($item['country']);
-            })
-            ->groupBy('country')
-            ->map(function ($orders, $country) {
-                return [
-                    'country' => $country,
-                    'count' => $orders->count(),
+                    'count' => $count,
                 ];
             })
             ->values()
-            ->sortByDesc('count')
-            ->take(20)
-            ->values();
+            ->toArray();
 
         // Orders by Hour of Day (aggregated)
         $ordersByHour = (clone $baseQuery)
@@ -230,7 +244,8 @@ class AnalyticsController extends Controller
             ->map(fn ($item) => [
                 'hour' => (int) $item->hour,
                 'count' => (int) $item->count,
-            ]);
+            ])
+            ->toArray();
 
         // Orders by Day of Week (aggregated)
         $ordersByDayOfWeek = (clone $baseQuery)
@@ -248,7 +263,8 @@ class AnalyticsController extends Controller
                     'day_number' => (int) $item->day_of_week,
                     'count' => (int) $item->count,
                 ];
-            });
+            })
+            ->toArray();
 
         // ========== NEW ANALYTICS ==========
 
@@ -262,25 +278,19 @@ class AnalyticsController extends Controller
 
         // Base query for previous period
         $previousBaseQuery = WcOrder::query()
-            ->whereBetween('created_at_wp', [$previousStartDate, $previousEndDate])
-            ->when($request->filled('website_ids'), function ($query) use ($request) {
-                $websiteIds = is_array($request->website_ids) 
-                    ? $request->website_ids 
-                    : explode(',', $request->website_ids);
-                $websiteIds = array_map('intval', $websiteIds);
-                $query->whereIn('website_id', $websiteIds);
-            })
-            ->when($request->filled('payment_status'), function ($query) use ($request) {
-                $query->where('status', $request->payment_status);
-            });
+            ->whereBetween('created_at_wp', [$previousStartDate, $previousEndDate]);
+        $previousBaseQuery = $applyFilters($previousBaseQuery);
 
-        // Previous period revenue
-        $previousRevenue = (float) (clone $previousBaseQuery)
-            ->where('status', 'completed')
-            ->sum('total');
+        // Combined previous period stats query
+        $previousStatsQuery = (clone $previousBaseQuery)
+            ->select(
+                DB::raw('COUNT(*) as total_orders'),
+                DB::raw('SUM(CASE WHEN status = "completed" THEN total ELSE 0 END) as total_revenue')
+            )
+            ->first();
 
-        // Previous period orders
-        $previousOrders = (clone $previousBaseQuery)->count();
+        $previousOrders = (int) ($previousStatsQuery->total_orders ?? 0);
+        $previousRevenue = (float) ($previousStatsQuery->total_revenue ?? 0);
 
         // Revenue Growth Calculation
         $revenueGrowthPercent = $previousRevenue > 0 
@@ -299,70 +309,52 @@ class AnalyticsController extends Controller
         $netRevenue = $totalRevenue - $paypalFees;
         $feePercentage = $totalRevenue > 0 ? ($paypalFees / $totalRevenue) * 100 : 0;
 
-        // Revenue by Country (for top performing country)
-        $revenueByCountry = (clone $baseQuery)
+        // Revenue by Country - optimized to only select needed columns and process in chunks
+        $countryRevenue = [];
+        (clone $baseQuery)
             ->where('status', 'completed')
-            ->get()
-            ->map(function ($order) {
-                $payload = $order->payload ?? [];
-                $country = data_get($payload, 'billing.country');
-                
-                if (empty($country)) {
-                    $ip = $this->extractIpFromPayload($payload);
-                    if ($ip) {
-                        $country = $this->getCountryFromIp($ip);
+            ->select('id', 'total', 'payload')
+            ->chunk(100, function ($orders) use (&$countryRevenue) {
+                foreach ($orders as $order) {
+                    $country = $this->extractCountryFromPayload($order->payload ?? []);
+                    if (!empty($country)) {
+                        $countryRevenue[$country] = ($countryRevenue[$country] ?? 0) + (float) $order->total;
                     }
                 }
-                
-                return [
-                    'country' => $country,
-                    'revenue' => (float) $order->total,
-                ];
-            })
-            ->filter(function ($item) {
-                return !empty($item['country']);
-            })
-            ->groupBy('country')
-            ->map(function ($orders, $country) {
-                return [
-                    'country' => $country,
-                    'revenue' => $orders->sum('revenue'),
-                ];
-            })
-            ->values()
-            ->sortByDesc('revenue')
-            ->first();
+            });
+
+        arsort($countryRevenue);
+        $topCountryRevenue = !empty($countryRevenue) 
+            ? ['country' => array_key_first($countryRevenue), 'revenue' => reset($countryRevenue)]
+            : null;
 
         // Top Performing Country
-        $topCountry = $revenueByCountry ? [
-            'country' => $revenueByCountry['country'],
-            'revenue' => $revenueByCountry['revenue'],
-            'percentage' => $totalRevenue > 0 ? ($revenueByCountry['revenue'] / $totalRevenue) * 100 : 0,
+        $topCountry = $topCountryRevenue ? [
+            'country' => $topCountryRevenue['country'],
+            'revenue' => $topCountryRevenue['revenue'],
+            'percentage' => $totalRevenue > 0 ? ($topCountryRevenue['revenue'] / $totalRevenue) * 100 : 0,
         ] : null;
 
         // Peak Order Time Insight (derived from existing data)
-        $peakHour = $ordersByHour->sortByDesc('count')->first();
-        $peakDay = $ordersByDayOfWeek->sortByDesc('count')->first();
-        $peakHourFormatted = $peakHour ? $this->formatHour($peakHour['hour']) : null;
-        $peakDayName = $peakDay ? $peakDay['day'] : null;
+        $peakHourData = collect($ordersByHour)->sortByDesc('count')->first();
+        $peakDayData = collect($ordersByDayOfWeek)->sortByDesc('count')->first();
+        $peakHourFormatted = $peakHourData ? $this->formatHour($peakHourData['hour']) : null;
+        $peakDayName = $peakDayData ? $peakDayData['day'] : null;
 
-        // Website Performance Ranking
-        $websitePerformance = [];
-        $websiteRevenueData = $revenueByWebsite->keyBy('id');
-        
-        // Get orders by website for AOV calculation
-        $ordersByWebsite = (clone $baseQuery)
+        // Website Performance Ranking - combined query for better performance
+        $websiteStats = (clone $baseQuery)
             ->select(
                 'websites.id',
                 'websites.name',
-                DB::raw('COUNT(wc_orders.id) as orders_count')
+                DB::raw('COUNT(wc_orders.id) as orders_count'),
+                DB::raw('SUM(CASE WHEN wc_orders.status = "completed" THEN wc_orders.total ELSE 0 END) as revenue')
             )
             ->join('websites', 'wc_orders.website_id', '=', 'websites.id')
             ->groupBy('websites.id', 'websites.name')
             ->get()
             ->keyBy('id');
 
-        // Get previous period revenue by website for growth calculation
+        // Get previous period revenue by website
         $previousRevenueByWebsite = (clone $previousBaseQuery)
             ->select(
                 'websites.id',
@@ -374,33 +366,29 @@ class AnalyticsController extends Controller
             ->get()
             ->keyBy('id');
 
-        foreach ($websiteRevenueData as $website) {
-            $orders = $ordersByWebsite->get($website['id']);
-            $ordersCount = $orders ? (int) $orders->orders_count : 0;
-            $revenue = $website['revenue'];
+        $websitePerformance = $websiteStats->map(function ($website) use ($previousRevenueByWebsite) {
+            $ordersCount = (int) $website->orders_count;
+            $revenue = (float) $website->revenue;
             $aov = $ordersCount > 0 ? $revenue / $ordersCount : 0;
 
-            $previousRev = $previousRevenueByWebsite->get($website['id']);
+            $previousRev = $previousRevenueByWebsite->get($website->id);
             $previousRevValue = $previousRev ? (float) $previousRev->revenue : 0;
             $growthPercent = $previousRevValue > 0 
                 ? (($revenue - $previousRevValue) / $previousRevValue) * 100 
                 : ($revenue > 0 ? 100 : 0);
 
-            $websitePerformance[] = [
-                'id' => $website['id'],
-                'name' => $website['name'],
+            return [
+                'id' => $website->id,
+                'name' => $website->name,
                 'revenue' => $revenue,
                 'orders' => $ordersCount,
                 'aov' => $aov,
                 'growth_percent' => $growthPercent,
             ];
-        }
-
-        // Sort by revenue descending
-        $websitePerformance = collect($websitePerformance)
-            ->sortByDesc('revenue')
-            ->values()
-            ->toArray();
+        })
+        ->sortByDesc('revenue')
+        ->values()
+        ->toArray();
 
         // Conversion Funnel: Form Submissions → Orders Created → Paid Orders
         $baseSubmissionQuery = FfSubmission::query()
@@ -427,7 +415,7 @@ class AnalyticsController extends Controller
             ? ($paidOrdersCount / $formSubmissions) * 100 
             : 0;
 
-        return Inertia::render('Analytics', [
+        return [
             'stats' => [
                 'total_revenue' => $totalRevenue,
                 'total_orders' => $totalOrders,
@@ -459,7 +447,7 @@ class AnalyticsController extends Controller
                 'order_to_paid_rate' => $orderToPaidRate,
                 'submission_to_paid_rate' => $submissionToPaidRate,
             ],
-            'websites' => Website::select('id', 'name')->orderBy('name')->get(),
+            'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
             'filters' => [
                 'start_date' => $startDate->format('Y-m-d'),
                 'end_date' => $endDate->format('Y-m-d'),
@@ -468,7 +456,51 @@ class AnalyticsController extends Controller
                     : [],
                 'payment_status' => $request->input('payment_status'),
             ],
-        ]);
+        ];
+    }
+
+    /**
+     * Extract PayPal fee from order payload
+     */
+    private function extractPaypalFee(array $payload): float
+    {
+        $metaData = $payload['meta_data'] ?? [];
+        
+        foreach ($metaData as $meta) {
+            if (isset($meta['key']) && $meta['key'] === '_ppcp_paypal_fees') {
+                $value = $meta['value'] ?? null;
+                if (is_array($value) && isset($value['paypal_fee']['value'])) {
+                    $paypalFeeValue = $value['paypal_fee']['value'];
+                    if ($paypalFeeValue !== null && $paypalFeeValue !== '') {
+                        return is_numeric($paypalFeeValue) ? (float) $paypalFeeValue : 0;
+                    }
+                }
+                break;
+            }
+        }
+        
+        return 0;
+    }
+
+    /**
+     * Extract country from order payload (with caching for IP lookups)
+     */
+    private function extractCountryFromPayload(array $payload): ?string
+    {
+        // First try to get country from billing address (most common and fastest)
+        $country = data_get($payload, 'billing.country');
+        
+        if (!empty($country)) {
+            return $country;
+        }
+        
+        // If no country in billing, try to get from IP address (slower, but cached)
+        $ip = $this->extractIpFromPayload($payload);
+        if ($ip) {
+            return $this->getCountryFromIp($ip);
+        }
+        
+        return null;
     }
 
     /**
