@@ -7,6 +7,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FfSubmissionController;
 use App\Http\Controllers\WebsiteController;
 use App\Http\Controllers\WcOrderController;
+use App\Http\Controllers\AnalyticsController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -33,6 +34,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('websites.sync-fluent-form');
 });
 Route::middleware(['auth'])->group(function () {
+    Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
     Route::put('/orders/{order}', [WcOrderController::class, 'update'])->name('orders.update');

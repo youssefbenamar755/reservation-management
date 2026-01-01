@@ -33,7 +33,7 @@ import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, FileText, Folder, Globe, LayoutGrid, Menu, Search, ShoppingCart } from 'lucide-vue-next';
+import { BookOpen, FileText, Folder, Globe, LayoutGrid, Menu, Search, ShoppingCart, TrendingUp } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 interface Props {
@@ -64,6 +64,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: '/dashboard',
         icon: LayoutGrid,
+    },
+    {
+        title: 'Analytics',
+        href: '/analytics',
+        icon: TrendingUp,
     },
     {
         title: 'Websites',
