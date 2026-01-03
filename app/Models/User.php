@@ -51,4 +51,14 @@ class User extends Authenticatable
             'is_admin' => 'boolean',
         ];
     }
+
+    /**
+     * Get the channels the user receives broadcast notifications on.
+     *
+     * @return string
+     */
+    public function receivesBroadcastNotificationsOn(): string
+    {
+        return 'App.Models.User.' . $this->id;
+    }
 }

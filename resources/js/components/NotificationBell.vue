@@ -9,8 +9,9 @@ import {
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { Bell } from 'lucide-vue-next';
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
+import Echo from '@/lib/echo';
 
 interface Notification {
     id: string;
@@ -30,11 +31,16 @@ interface Notification {
 const page = usePage();
 const notifications = ref<Notification[]>([]);
 const loading = ref(false);
+const localUnreadCount = ref(0);
+
+// Compute unread count from both props and local state
 const unreadCount = computed(() => {
     try {
-        return (page.props as any).notifications?.unread_count ?? 0;
+        const propCount = (page.props as any).notifications?.unread_count ?? 0;
+        // Use local count if it's higher (for real-time updates)
+        return Math.max(propCount, localUnreadCount.value);
     } catch {
-        return 0;
+        return localUnreadCount.value;
     }
 });
 
@@ -67,6 +73,8 @@ const fetchNotifications = async () => {
         }
         const data = await response.json();
         notifications.value = data.notifications || [];
+        // Update local unread count
+        localUnreadCount.value = data.unread_count ?? 0;
     } catch (error) {
         console.error('Failed to fetch notifications:', error);
         notifications.value = [];
@@ -88,6 +96,16 @@ const handleNotificationClick = async (notification: Notification) => {
         
         const data = await response.json();
         
+        // Update notification as read locally
+        const index = notifications.value.findIndex(n => n.id === notification.id);
+        if (index !== -1) {
+            notifications.value[index].read_at = new Date().toISOString();
+            // Decrease unread count if it was unread
+            if (!notification.read_at) {
+                localUnreadCount.value = Math.max(0, localUnreadCount.value - 1);
+            }
+        }
+        
         if (data.success && data.redirect_url) {
             // Navigate to the notification's target page
             router.visit(data.redirect_url);
@@ -101,7 +119,7 @@ const handleNotificationClick = async (notification: Notification) => {
         
         // Refresh notifications and unread count
         await fetchNotifications();
-        router.reload({ only: ['notifications'] });
+        router.reload({ only: ['notifications'], preserveState: true });
     } catch (error) {
         console.error('Failed to mark notification as read:', error);
     }
@@ -116,10 +134,16 @@ const markAllAsRead = async () => {
             },
         });
         
+        // Mark all as read locally
+        notifications.value.forEach(n => {
+            n.read_at = n.read_at || new Date().toISOString();
+        });
+        localUnreadCount.value = 0;
+        
         // Reload notifications
         await fetchNotifications();
         // Reload page to update unread count
-        router.reload({ only: ['notifications'] });
+        router.reload({ only: ['notifications'], preserveState: true });
     } catch (error) {
         console.error('Failed to mark all as read:', error);
     }
@@ -135,10 +159,70 @@ const getNotificationUrl = (notification: Notification): string => {
     return '#';
 };
 
+// Real-time notification handler
+const handleRealTimeNotification = (data: any) => {
+    // Add new notification to the top of the list
+    const newNotification: Notification = {
+        id: data.id,
+        type: data.type,
+        message: data.message,
+        read_at: null,
+        created_at: data.created_at,
+        data: data.data || {},
+    };
+    
+    // Add to the beginning of the list
+    notifications.value = [newNotification, ...notifications.value];
+    
+    // Update local unread count
+    localUnreadCount.value += 1;
+    
+    // Reload page props to sync unread count
+    router.reload({ only: ['notifications'], preserveState: true });
+};
+
+let channel: any = null;
+
 onMounted(() => {
-    // Only fetch if user is authenticated
-    if (page.props.auth?.user) {
-        fetchNotifications();
+    const user = page.props.auth?.user;
+    
+    // Only setup if user is authenticated
+    if (!user) {
+        return;
+    }
+    
+    // Fetch initial notifications
+    fetchNotifications();
+    
+    // Initialize local unread count from props
+    try {
+        localUnreadCount.value = (page.props as any).notifications?.unread_count ?? 0;
+    } catch {
+        localUnreadCount.value = 0;
+    }
+    
+    // Subscribe to private channel for real-time notifications
+    try {
+        const channelName = `App.Models.User.${user.id}`;
+        channel = Echo.private(channelName);
+        
+        // Listen for notification events
+        channel.listen('.notification', (data: any) => {
+            handleRealTimeNotification(data);
+        });
+    } catch (error) {
+        console.error('Failed to setup real-time notifications:', error);
+    }
+});
+
+onUnmounted(() => {
+    // Unsubscribe from channel when component is destroyed
+    if (channel) {
+        try {
+            Echo.leave(`App.Models.User.${page.props.auth?.user?.id}`);
+        } catch (error) {
+            console.error('Failed to leave channel:', error);
+        }
     }
 });
 </script>
