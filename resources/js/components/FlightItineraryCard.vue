@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { 
   Plane, 
-  Calendar, 
   Clock, 
-  Users, 
   DollarSign, 
-  Luggage, 
-  MapPin,
-  ChevronRight
+  Luggage
 } from 'lucide-vue-next'
 
 interface Props {
@@ -297,7 +293,7 @@ if (!isValidFlightData.value) {
         <template v-for="(itinerary, itineraryIndex) in props.flightData.itineraries" :key="itineraryIndex">
           <!-- Itinerary Header -->
           <div v-if="props.flightData.itineraries.length > 1" class="mb-6">
-            <h3 class="text-lg font-semibold mb-1">Trip {{ itineraryIndex + 1 }}</h3>
+            <h3 class="text-lg font-semibold mb-1">Trip {{ Number(itineraryIndex) + 1 }}</h3>
             <p class="text-sm text-muted-foreground">
               {{ formatDateTime(getSegments(itinerary)[0]?.departure?.at || '').date }} - 
               {{ formatDateTime(getSegments(itinerary)[getSegments(itinerary).length - 1]?.arrival?.at || '').date }}

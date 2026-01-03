@@ -513,7 +513,7 @@ function formatHour(hour: number): string {
           <CardContent>
             <BarChart
               v-if="ordersByDayOfWeek.length > 0"
-              :data="ordersByDayOfWeek.sort((a, b) => a.day_number - b.day_number)"
+              :data="[...ordersByDayOfWeek].sort((a, b) => a.day_number - b.day_number)"
               label-key="day"
               value-key="count"
               label="Orders"

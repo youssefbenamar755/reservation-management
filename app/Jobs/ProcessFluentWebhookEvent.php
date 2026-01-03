@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\WebhookEvent;
 use App\Models\FfSubmission;
+use App\Models\User;
+use App\Notifications\NewFormSubmissionNotification;
 use App\Services\FluentFormSchemaService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -128,7 +130,13 @@ class ProcessFluentWebhookEvent implements ShouldQueue
             $schemaService->syncFormSchema($website, (int) $formId);
         }
 
-        FfSubmission::updateOrCreate(
+        // Check if submission already exists to only notify on new submissions
+        $existingSubmission = FfSubmission::where('website_id', $event->website_id)
+            ->where('form_id', (int) $formId)
+            ->where('entry_id', (int) $entryId)
+            ->first();
+
+        $submission = FfSubmission::updateOrCreate(
             [
                 'website_id' => $event->website_id,
                 'form_id' => (int) $formId,
@@ -142,6 +150,13 @@ class ProcessFluentWebhookEvent implements ShouldQueue
                 'payload' => $finalPayload,
             ]
         );
+
+        // Notify all admin users if this is a new submission
+        if (!$existingSubmission) {
+            User::where('is_admin', true)->each(function ($user) use ($submission) {
+                $user->notify(new NewFormSubmissionNotification($submission));
+            });
+        }
 
         $event->update([
             'status' => 'processed',

@@ -16,7 +16,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
 import { useToast } from '@/composables/useToast'
 import axios from 'axios'
 
@@ -290,7 +289,7 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
                 :key="`${form.website_id}-${form.form_id}`"
                 class="border-b transition-colors cursor-pointer"
                 :class="[
-                  index % 2 === 0 ? 'bg-background' : 'bg-muted/20',
+                  Number(index) % 2 === 0 ? 'bg-background' : 'bg-muted/20',
                   'hover:bg-muted/50'
                 ]"
                 @click="router.visit(`/submissions/forms/${form.website_id}/${form.form_id}`)"
@@ -395,10 +394,10 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
             <div class="flex items-center gap-1">
               <template
                 v-for="(link, index) in forms.links"
-                :key="index"
               >
                 <Button
-                  v-if="link.label && index > 0 && index < forms.links.length - 1"
+                  v-if="link.label && Number(index) > 0 && Number(index) < forms.links.length - 1"
+                  :key="`btn-${index}`"
                   variant="outline"
                   size="sm"
                   :class="{
@@ -412,6 +411,7 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
                 </Button>
                 <span
                   v-else-if="link.label === '...'"
+                  :key="`dots-${index}`"
                   class="px-2 py-1 text-muted-foreground"
                 >
                   ...

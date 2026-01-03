@@ -1,19 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { 
   Plane, 
-  Calendar, 
-  Clock, 
-  Users, 
-  DollarSign, 
-  Luggage, 
-  MapPin,
-  ChevronRight,
-  ChevronDown,
-  Code,
   Eye,
   EyeOff
 } from 'lucide-vue-next'
@@ -123,40 +114,9 @@ function getSegments(itinerary: any): any[] {
   return itinerary.segments || []
 }
 
-// Get route summary (outbound and return)
-const routeSummary = computed(() => {
-  const itineraries = props.flightData?.itineraries || []
-  if (itineraries.length === 0) return null
-  
-  const routes: Array<{ type: string; from: string; to: string; date: string }> = []
-  
-  itineraries.forEach((itinerary: any, index: number) => {
-    const segments = getSegments(itinerary)
-    if (segments.length === 0) return
-    
-    const firstSegment = segments[0]
-    const lastSegment = segments[segments.length - 1]
-    
-    const from = firstSegment.departure?.iataCode || '—'
-    const to = lastSegment.arrival?.iataCode || '—'
-    const date = formatDateTime(firstSegment.departure?.at || '').date
-    
-    routes.push({
-      type: index === 0 ? 'Outbound' : 'Return',
-      from,
-      to,
-      date
-    })
-  })
-  
-  return routes
-})
 
-// Get first route (for Flight Summary display)
-const firstRoute = computed(() => {
-  if (!routeSummary.value || routeSummary.value.length === 0) return null
-  return routeSummary.value[0]
-})
+
+
 
 // Get airline codes
 const airlineCodes = computed(() => {
@@ -215,66 +175,7 @@ const priceInfo = computed(() => {
   }
 })
 
-// Get baggage info
-const baggageInfo = computed(() => {
-  const travelerPricings = props.flightData?.travelerPricings || []
-  if (travelerPricings.length === 0) {
-    return {
-      checked: { quantity: 0, weight: null },
-      cabin: { quantity: 0 }
-    }
-  }
-  
-  const firstTraveler = travelerPricings[0]
-  const fareDetailsBySegment = firstTraveler?.fareDetailsBySegment || []
-  
-  if (fareDetailsBySegment.length === 0) {
-    return {
-      checked: { quantity: 0, weight: null },
-      cabin: { quantity: 0 }
-    }
-  }
-  
-  const firstSegment = fareDetailsBySegment[0]
-  
-  return {
-    checked: {
-      quantity: firstSegment.includedCheckedBags?.quantity || 0,
-      weight: firstSegment.includedCheckedBags?.weight || null
-    },
-    cabin: {
-      quantity: firstSegment.includedCabinBags?.quantity || 0
-    }
-  }
-})
 
-// Get fare brand and basis
-const fareInfo = computed(() => {
-  const travelerPricings = props.flightData?.travelerPricings || []
-  if (travelerPricings.length === 0) {
-    return {
-      brand: null,
-      basis: null
-    }
-  }
-  
-  const firstTraveler = travelerPricings[0]
-  const fareDetailsBySegment = firstTraveler?.fareDetailsBySegment || []
-  
-  if (fareDetailsBySegment.length === 0) {
-    return {
-      brand: null,
-      basis: null
-    }
-  }
-  
-  const firstSegment = fareDetailsBySegment[0]
-  
-  return {
-    brand: firstSegment.brandedFare || firstSegment.fareBasis || null,
-    basis: firstSegment.fareBasis || null
-  }
-})
 </script>
 
 <template>

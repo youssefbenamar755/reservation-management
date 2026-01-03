@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Head, router, usePage } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import HeadingSmall from '@/components/HeadingSmall.vue';
@@ -32,9 +32,8 @@ interface Props {
     updateStatus: UpdateStatus;
 }
 
-const props = defineProps<Props>();
+defineProps<Props>();
 
-const page = usePage();
 const showConfirmDialog = ref(false);
 const isProcessing = ref(false);
 

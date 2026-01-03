@@ -315,11 +315,11 @@ function formatDate(dateString: string | null) {
             <div class="flex items-center gap-1">
               <template
                 v-for="(link, index) in orders.links"
-                class="hidden sm:block"
-                :key="index"
               >
                 <Button
                   v-if="link.label && Number(index) > 0 && Number(index) < orders.links.length - 1"
+                  :key="`btn-${index}`"
+                  class="hidden sm:block"
                   variant="outline"
                   size="sm"
                   :class="{
@@ -333,7 +333,8 @@ function formatDate(dateString: string | null) {
                 </Button>
                 <span
                   v-else-if="link.label === '...' && Number(index) > 0 && Number(index) < orders.links.length - 1"
-                  class="px-2 py-1 text-muted-foreground"
+                  :key="`dots-${index}`"
+                  class="px-2 py-1 text-muted-foreground hidden sm:block"
                 >
                   ...
                 </span>

@@ -188,6 +188,20 @@ function copyToClipboard(text: string, fieldKey: string) {
   })
 }
 
+function formatFieldValue(field: { key: string; value: any; label: string }): string {
+  if (typeof field.value === 'object' || Array.isArray(field.value)) {
+    return JSON.stringify(field.value).substring(0, 50) + '...'
+  }
+  
+  const valueStr = String(field.value)
+  const keyLower = field.key.toLowerCase()
+  const labelLower = field.label.toLowerCase()
+  const isNameField = keyLower.includes('name') || labelLower.includes('name')
+  
+  // Show full text for name fields, truncate others
+  return isNameField ? valueStr : (valueStr.length > 50 ? valueStr.substring(0, 50) + '...' : valueStr)
+}
+
 // Extract data from payload
 const payload = computed(() => props.order.payload || {})
 const billing = computed(() => payload.value.billing || {})
@@ -689,12 +703,8 @@ const flightData = computed(() => {
                   <span class="text-muted-foreground font-medium capitalize">
                     {{ field.label }}:
                   </span>
-                  <span class="text-left sm:text-right font-medium text-foreground break-words sm:break-normal">
-                    {{ typeof field.value === 'object' || Array.isArray(field.value) 
-                      ? JSON.stringify(field.value).substring(0, 50) + '...' 
-                      : String(field.value).length > 50 
-                        ? String(field.value).substring(0, 50) + '...' 
-                        : field.value }}
+                  <span class="text-left sm:text-right font-medium text-foreground break-words">
+                    {{ formatFieldValue(field) }}
                   </span>
                 </div>
               </div>

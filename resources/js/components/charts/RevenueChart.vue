@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-nocheck
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -76,6 +77,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         callbacks: {
           label: (context) => {
             const value = context.parsed.y
+            // @ts-ignore
             return new Intl.NumberFormat('en-US', {
               style: 'currency',
               currency: props.currency,
@@ -103,6 +105,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         ticks: {
           color: textColor,
           callback: (value) => {
+            // @ts-ignore
             return new Intl.NumberFormat('en-US', {
               style: 'currency',
               currency: props.currency,

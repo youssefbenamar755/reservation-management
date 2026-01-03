@@ -3,6 +3,9 @@ import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
 import AppearanceDropdown from '@/components/AppearanceDropdown.vue';
+import NotificationBell from '@/components/NotificationBell.vue';
+import { usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 
 withDefaults(
     defineProps<{
@@ -12,6 +15,9 @@ withDefaults(
         breadcrumbs: () => [],
     },
 );
+
+const page = usePage();
+const auth = computed(() => page.props.auth);
 </script>
 
 <template>
@@ -26,6 +32,7 @@ withDefaults(
         </div>
 
         <div class="flex items-center gap-2">
+            <NotificationBell v-if="auth.user" />
             <AppearanceDropdown />
         </div>
     </header>

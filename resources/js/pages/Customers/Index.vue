@@ -5,7 +5,7 @@ import { Head, router, Link } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
 interface Customer {
   email: string
@@ -403,7 +403,7 @@ const customerEmail = (email: string) => encodeURIComponent(email)
 
         <!-- PAGINATION -->
         <div
-          v-if="customers && (customers.total || customers.meta?.total) > 0"
+          v-if="customers && (customers.total || (customers.meta?.total ?? 0)) > 0"
           class="flex flex-col gap-4 border-t bg-muted/30 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
         >
           <!-- Pagination Info -->

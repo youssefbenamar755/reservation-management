@@ -9,6 +9,7 @@ use App\Http\Controllers\WebsiteController;
 use App\Http\Controllers\WcOrderController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\CustomersController;
+use App\Http\Controllers\NotificationController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -61,4 +62,9 @@ Route::middleware(['auth'])->group(function () {
     
     // Delete all submissions for a form
     Route::delete('/submissions/forms/{website}/{form_id}', [FfSubmissionController::class, 'destroyForm'])->name('submissions.destroy-form');
+    
+    // Notifications
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.mark-as-read');
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.mark-all-as-read');
 });

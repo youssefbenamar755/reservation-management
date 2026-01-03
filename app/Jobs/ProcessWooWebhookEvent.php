@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\WebhookEvent;
 use App\Models\WcOrder;
+use App\Models\User;
+use App\Notifications\NewOrderNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -31,9 +33,17 @@ class ProcessWooWebhookEvent implements ShouldQueue
         // WooCommerce may have payment_status field directly, or we derive it from date_paid
         $paymentStatus = $this->extractPaymentStatus($payload);
 
+        // Check if order already exists to only notify on new orders
+        $existingOrder = WcOrder::where('website_id', $event->website_id)
+            ->where('wp_order_id', $payload['id'])
+            ->first();
+
+        // Only notify on order.created, not order.updated
+        $isNewOrder = !$existingOrder && $event->topic === 'order.created';
+
         // Upsert Woo order - handles both order.created and order.updated
         // Uses updateOrCreate to ensure idempotency (no duplicates)
-        WcOrder::updateOrCreate(
+        $order = WcOrder::updateOrCreate(
             [
                 'website_id' => $event->website_id,
                 'wp_order_id' => $payload['id'],
@@ -54,6 +64,13 @@ class ProcessWooWebhookEvent implements ShouldQueue
                 'payload' => $payload,
             ]
         );
+
+        // Notify all admin users if this is a new order
+        if ($isNewOrder) {
+            User::where('is_admin', true)->each(function ($user) use ($order) {
+                $user->notify(new NewOrderNotification($order));
+            });
+        }
 
         $event->update([
             'status' => 'processed',
