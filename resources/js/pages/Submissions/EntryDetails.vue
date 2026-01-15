@@ -147,10 +147,31 @@ function generatePnr() {
   
   router.post(`/submissions/entries/${props.entry.id}/generate-pnr`, {}, {
     preserveScroll: true,
-    onSuccess: () => {
+    onSuccess: (page) => {
       isGeneratingPnr.value = false
-      // Reload the page to show the generated PNR
-      router.reload({ only: ['entry'] })
+      
+      // Reload entry data to show the generated PNR (partial reload, no full page refresh)
+      router.reload({ 
+        only: ['entry'],
+        onSuccess: (reloadedPage) => {
+          // After reload, check if entry has PDF path and open it
+          const entry = (reloadedPage.props as any).entry
+          if (entry?.pnr_pdf_path) {
+            // Construct PDF URL - Laravel's storage link
+            const pdfUrl = `/storage/${entry.pnr_pdf_path}`
+            // Open PDF in new tab
+            window.open(pdfUrl, '_blank')
+            toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
+          } else {
+            // Check for PDF URL in flash data as fallback
+            const flash = (reloadedPage.props as any).flash
+            if (flash?.pdf_url) {
+              window.open(flash.pdf_url, '_blank')
+              toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
+            }
+          }
+        }
+      })
     },
     onError: (errors) => {
       isGeneratingPnr.value = false

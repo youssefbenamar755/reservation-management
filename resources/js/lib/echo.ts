@@ -5,20 +5,7 @@ import Pusher from 'pusher-js';
 declare global {
     interface Window {
         Pusher: typeof Pusher;
-        Echo: Echo;
-    }
-}
-
-// Type definition for Echo to fix TypeScript issues
-declare module 'laravel-echo' {
-    interface Echo {
-        private(channel: string): Channel;
-        leave(channel: string): void;
-    }
-    
-    interface Channel {
-        listen(event: string, callback: (data: any) => void): Channel;
-        stopListening(event: string): Channel;
+        Echo: Echo<any>;
     }
 }
 

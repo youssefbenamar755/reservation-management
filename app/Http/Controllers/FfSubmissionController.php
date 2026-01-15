@@ -306,7 +306,7 @@ class FfSubmissionController extends Controller
     /**
      * Delete all submissions for a form
      */
-    public function destroyForm(Website $website, int $formId)
+    public function destroyAll(Website $website, int $formId)
     {
         $deletedCount = FfSubmission::where('website_id', $website->id)
             ->where('form_id', $formId)
@@ -452,12 +452,74 @@ class FfSubmissionController extends Controller
             $route = $extractedData['route'] ?? ['origin' => 'UNKNOWN', 'destination' => 'UNKNOWN'];
             $dates = $extractedData['dates'] ?? ['departure' => null, 'return' => null];
 
-            // Generate PDF
+            // Extract flight data from submission for airline/flight number extraction
+            $payload = $submission->payload ?? [];
+            $response = $payload['response'] ?? [];
+            
+            // Handle case where response is a JSON string
+            if (is_string($response)) {
+                try {
+                    $response = json_decode($response, true);
+                    if (!is_array($response)) {
+                        $response = [];
+                    }
+                } catch (\Exception $e) {
+                    $response = [];
+                }
+            }
+
+            // Extract flight_json_data if available
+            $flightData = null;
+            foreach ($response as $key => $value) {
+                $keyLower = strtolower($key);
+                if (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'json') !== false) {
+                    if (is_string($value)) {
+                        try {
+                            $flightData = json_decode($value, true);
+                        } catch (\Exception $e) {
+                            // Ignore parsing errors
+                        }
+                    } elseif (is_array($value)) {
+                        $flightData = $value;
+                    }
+                    break;
+                }
+            }
+
+            // Also check pnr_data for flight information
+            if (empty($flightData) && isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
+                $flightData = $pnrResult['pnr_data'];
+            }
+
+            // Merge pnr_data into flightData for extraction if available
+            if (empty($flightData) && isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
+                $flightData = $pnrResult['pnr_data'];
+            } elseif (isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
+                // Merge itineraries if pnr_data has more complete flight info
+                if (isset($pnrResult['pnr_data']['itineraries']) && !empty($pnrResult['pnr_data']['itineraries'])) {
+                    $flightData['itineraries'] = $pnrResult['pnr_data']['itineraries'];
+                }
+                if (isset($pnrResult['pnr_data']['validatingAirlineCodes']) && !empty($pnrResult['pnr_data']['validatingAirlineCodes'])) {
+                    $flightData['validatingAirlineCodes'] = $pnrResult['pnr_data']['validatingAirlineCodes'];
+                }
+            }
+
+            // Generate PDF with all available data
+            // VERIFICATION: This uses DummyTicketPdfService which renders pdf.dummy-ticket template
+            Log::info('Generating PDF using DummyTicketPdfService', [
+                'submission_id' => $submission->id,
+                'service' => 'DummyTicketPdfService',
+                'template' => 'pdf.dummy-ticket',
+                'template_path' => resource_path('views/pdf/dummy-ticket.blade.php'),
+            ]);
+            
+            // PDF service will extract airline and flight number from flightData
             $pdfPath = $pdfService->generatePdf([
                 'passengers' => $passengersForPdf,
                 'route' => $route,
                 'dates' => $dates,
                 'pnr' => $pnrResult['pnr'],
+                'flightData' => $flightData ?? $response, // Pass flight data for airline/flight extraction
             ]);
 
             // Verify PDF file was created
@@ -479,15 +541,24 @@ class FfSubmissionController extends Controller
                 'pnr_source' => $pnrResult['source'],
             ]);
 
+            // Generate PDF URL for frontend
+            $pdfUrl = asset('storage/' . $pdfPath);
+
             Log::info('PNR generated successfully', [
                 'submission_id' => $submission->id,
                 'pnr' => $pnrResult['pnr'],
                 'source' => $pnrResult['source'],
                 'pdf_path' => $pdfPath,
+                'pdf_url' => $pdfUrl,
                 'pdf_file_exists' => file_exists($fullPdfPath),
             ]);
 
-            return back()->with('success', 'PNR generated successfully: ' . $pnrResult['pnr']);
+            // Return with success message and PDF URL for frontend
+            return back()->with([
+                'success' => 'PNR generated successfully: ' . $pnrResult['pnr'],
+                'pdf_url' => $pdfUrl,
+                'pnr' => $pnrResult['pnr'],
+            ]);
         } catch (\Throwable $e) {
             Log::error('Failed to generate PNR', [
                 'submission_id' => $submission->id,
@@ -503,19 +574,23 @@ class FfSubmissionController extends Controller
      * Download PNR PDF
      */
     public function downloadPnrPdf(
-        FfSubmission $submission,
+        FfSubmission $entry,
         PnrGenerationService $pnrService,
         DummyTicketPdfService $pdfService
     ) {
+        $submission = $entry; // Alias for consistency with other code
+        
+        // Always regenerate PDF to ensure latest template is used
         // If PNR exists but PDF path is missing, try to regenerate PDF
-        if ($submission->pnr && !$submission->pnr_pdf_path) {
+        if ($submission->pnr) {
             Log::info('PNR exists but PDF path is missing, attempting to regenerate PDF', [
                 'submission_id' => $submission->id,
                 'pnr' => $submission->pnr,
+                'has_payload' => !empty($submission->payload),
             ]);
 
             try {
-                // Extract data from submission payload (same logic as PNR generation)
+                // Extract data from submission payload (same logic as generatePnr)
                 $payload = $submission->payload ?? [];
                 $response = $payload['response'] ?? [];
                 
@@ -531,7 +606,7 @@ class FfSubmissionController extends Controller
                     }
                 }
                 
-                // Extract passengers using the same method as in controller
+                // Extract passengers using the controller's method
                 $passengerData = $this->extractPassengerData($response, $submission);
                 $passengersForPdf = [];
                 
@@ -540,23 +615,16 @@ class FfSubmissionController extends Controller
                     $passengersForPdf[] = [
                         'firstName' => strtoupper($passenger['first_name'] ?? 'PASSENGER'),
                         'lastName' => strtoupper($passenger['last_name'] ?? 'TEST'),
-                        'dateOfBirth' => '1990-01-01', // Default if not available
-                    ];
-                }
-                
-                $passengersForPdf = [];
-                
-                // Convert passenger data to format expected by PDF service
-                foreach ($extractedData['passengers'] ?? [] as $passenger) {
-                    $passengersForPdf[] = [
-                        'firstName' => $passenger['firstName'] ?? 'PASSENGER',
-                        'lastName' => $passenger['lastName'] ?? 'TEST',
-                        'dateOfBirth' => $passenger['dateOfBirth'] ?? '1990-01-01',
+                        'dateOfBirth' => $passenger['date_of_birth'] ?? '1990-01-01',
                     ];
                 }
                 
                 // If no passengers found, create a default one
                 if (empty($passengersForPdf)) {
+                    Log::warning('No passengers found in submission, using default passenger', [
+                        'submission_id' => $submission->id,
+                        'passenger_data_keys' => array_keys($passengerData),
+                    ]);
                     $passengersForPdf[] = [
                         'firstName' => 'PASSENGER',
                         'lastName' => 'TEST',
@@ -572,11 +640,11 @@ class FfSubmissionController extends Controller
                 foreach ($response as $key => $value) {
                     $keyLower = strtolower($key);
                     if (strpos($keyLower, 'flight_from') !== false || 
-                        (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'from') !== false)) {
+                        (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'from') !== false && strpos($keyLower, 'json') === false)) {
                         $route['origin'] = is_string($value) ? trim($value) : 'UNKNOWN';
                     }
                     if (strpos($keyLower, 'flight_to') !== false || 
-                        (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'to') !== false && strpos($keyLower, 'from') === false)) {
+                        (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'to') !== false && strpos($keyLower, 'from') === false && strpos($keyLower, 'json') === false)) {
                         $route['destination'] = is_string($value) ? trim($value) : 'UNKNOWN';
                     }
                     if (strpos($keyLower, 'departure') !== false && strpos($keyLower, 'date') !== false) {
@@ -587,16 +655,63 @@ class FfSubmissionController extends Controller
                     }
                 }
 
-                // Generate PDF
+                // Extract flight_json_data if available for airline/flight number
+                $flightData = null;
+                foreach ($response as $key => $value) {
+                    $keyLower = strtolower($key);
+                    if (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'json') !== false) {
+                        if (is_string($value)) {
+                            try {
+                                $flightData = json_decode($value, true);
+                            } catch (\Exception $e) {
+                                // Ignore parsing errors
+                            }
+                        } elseif (is_array($value)) {
+                            $flightData = $value;
+                        }
+                        break;
+                    }
+                }
+                
+                Log::info('Extracted data for PDF regeneration', [
+                    'submission_id' => $submission->id,
+                    'passengers_count' => count($passengersForPdf),
+                    'route' => $route,
+                    'dates' => $dates,
+                    'has_flight_data' => !empty($flightData),
+                ]);
+
+                // Delete old PDF file if it exists to ensure fresh generation
+                if ($submission->pnr_pdf_path) {
+                    $oldPdfPath = storage_path('app/public/' . $submission->pnr_pdf_path);
+                    if (file_exists($oldPdfPath)) {
+                        @unlink($oldPdfPath);
+                        Log::info('Deleted old PDF file before regeneration', [
+                            'old_path' => $oldPdfPath,
+                        ]);
+                    }
+                }
+
+                // Generate PDF with all available data
+                // VERIFICATION: This uses DummyTicketPdfService which renders pdf.dummy-ticket template
+                Log::info('Generating PDF using DummyTicketPdfService', [
+                    'submission_id' => $submission->id,
+                    'service' => 'DummyTicketPdfService',
+                    'template' => 'pdf.dummy-ticket',
+                    'template_path' => resource_path('views/pdf/dummy-ticket.blade.php'),
+                ]);
+                
                 $pdfPath = $pdfService->generatePdf([
                     'passengers' => $passengersForPdf,
                     'route' => $route,
                     'dates' => $dates,
                     'pnr' => $submission->pnr,
+                    'flightData' => $flightData ?? $response, // Pass flight data for airline/flight extraction
                 ]);
 
                 // Verify PDF was created
                 $fullPdfPath = storage_path('app/public/' . $pdfPath);
+                
                 if (!file_exists($fullPdfPath)) {
                     throw new \RuntimeException('PDF file was not created at: ' . $fullPdfPath);
                 }
@@ -618,6 +733,9 @@ class FfSubmissionController extends Controller
             }
         }
 
+        // Refresh submission to get latest data
+        $submission->refresh();
+        
         if (!$submission->pnr_pdf_path) {
             Log::warning('PDF download attempted but pnr_pdf_path is empty', [
                 'submission_id' => $submission->id,
@@ -640,7 +758,43 @@ class FfSubmissionController extends Controller
             return back()->with('error', 'PDF file not found at: ' . $submission->pnr_pdf_path);
         }
 
-        return response()->download($filePath, 'ticket_' . $submission->pnr . '.pdf');
+        // Generate download filename: Itinerary-{passengerName} - {pnr}.pdf
+        $downloadFilename = 'Itinerary-Passenger - ' . strtoupper($submission->pnr) . '.pdf';
+        
+        // Try to extract passenger name from submission payload
+        try {
+            $payload = $submission->payload ?? [];
+            $response = $payload['response'] ?? [];
+            
+            if (is_string($response)) {
+                $response = json_decode($response, true) ?? [];
+            }
+            
+            $passengerData = $this->extractPassengerData($response, $submission);
+            if (!empty($passengerData['passengers']) && isset($passengerData['passengers'][0])) {
+                $firstPassenger = $passengerData['passengers'][0];
+                $firstName = $firstPassenger['first_name'] ?? '';
+                $lastName = $firstPassenger['last_name'] ?? '';
+                if (!empty($firstName) || !empty($lastName)) {
+                    $passengerName = trim(($lastName ?: '') . ' ' . ($firstName ?: ''));
+                    if (!empty($passengerName)) {
+                        // Sanitize passenger name for filesystem
+                        $passengerName = preg_replace('/[^a-zA-Z0-9\s\-_]/', '', $passengerName);
+                        $passengerName = preg_replace('/\s+/', '-', trim($passengerName));
+                        $passengerName = strtoupper($passengerName);
+                        $downloadFilename = 'Itinerary-' . $passengerName . ' - ' . strtoupper($submission->pnr) . '.pdf';
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            // If extraction fails, use default filename
+            Log::warning('Failed to extract passenger name for PDF filename', [
+                'submission_id' => $submission->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+        
+        return response()->download($filePath, $downloadFilename);
     }
 
 

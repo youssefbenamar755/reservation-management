@@ -61,7 +61,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/submissions/forms/{website}/sync-all-schemas', [FfSubmissionController::class, 'syncAllFormSchemas'])->name('submissions.sync-all-schemas');
     
     // Delete all submissions for a form
-    Route::delete('/submissions/forms/{website}/{form_id}', [FfSubmissionController::class, 'destroyForm'])->name('submissions.destroy-form');
+    Route::delete('/submissions/forms/{website}/{form_id}', [FfSubmissionController::class, 'destroyAll'])->name('submissions.destroy-all');
     
     // Notifications
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');

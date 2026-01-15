@@ -119,7 +119,7 @@ const handleNotificationClick = async (notification: Notification) => {
         
         // Refresh notifications and unread count
         await fetchNotifications();
-        router.reload({ only: ['notifications'], preserveState: true });
+        router.reload({ only: ['notifications'] });
     } catch (error) {
         console.error('Failed to mark notification as read:', error);
     }
@@ -127,25 +127,38 @@ const handleNotificationClick = async (notification: Notification) => {
 
 const markAllAsRead = async () => {
     try {
-        await fetch('/notifications/read-all', {
+        const response = await fetch('/notifications/read-all', {
             method: 'POST',
             headers: {
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
             },
         });
         
-        // Mark all as read locally
-        notifications.value.forEach(n => {
-            n.read_at = n.read_at || new Date().toISOString();
-        });
-        localUnreadCount.value = 0;
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
-        // Reload notifications
-        await fetchNotifications();
-        // Reload page to update unread count
-        router.reload({ only: ['notifications'], preserveState: true });
+        const data = await response.json();
+        
+        if (data.success) {
+            // Mark all as read locally
+            notifications.value.forEach(n => {
+                n.read_at = n.read_at || new Date().toISOString();
+            });
+            localUnreadCount.value = 0;
+            
+            // Reload notifications
+            await fetchNotifications();
+            // Reload page to update unread count
+            router.reload({ only: ['notifications'] });
+        } else {
+            throw new Error('Failed to mark all as read');
+        }
     } catch (error) {
         console.error('Failed to mark all as read:', error);
+        // Optionally show a toast notification to the user
     }
 };
 
@@ -178,7 +191,7 @@ const handleRealTimeNotification = (data: any) => {
     localUnreadCount.value += 1;
     
     // Reload page props to sync unread count
-    router.reload({ only: ['notifications'], preserveState: true });
+    router.reload({ only: ['notifications'] });
 };
 
 let channel: any = null;

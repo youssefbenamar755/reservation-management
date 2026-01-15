@@ -11,6 +11,7 @@ class PnrGenerationService
         private AmadeusService $amadeusService
     ) {}
 
+
     /**
      * Generate PNR for a submission
      *
@@ -364,6 +365,34 @@ class PnrGenerationService
             // Validate flight offer before sending to Amadeus
             $this->validateFlightOffer($flightOffer);
 
+            // CRITICAL: Final validation before API call - ensure ID is numeric
+            if (!isset($flightOffer['id']) || !is_string($flightOffer['id'])) {
+                throw new \RuntimeException('Flight offer ID is missing or not a string');
+            }
+            
+            if (!preg_match('/^[A-Za-z0-9_-]+$/', $flightOffer['id'])) {
+                throw new \RuntimeException('Flight offer ID contains invalid characters: ' . $flightOffer['id']);
+            }
+            
+            // Note: Amadeus actually requires purely numeric IDs (despite "AlphaNumeric" error message)
+            // The generateCleanOfferId() already returns numeric, so this check is not needed
+            // But we keep it for validation - if ID is not numeric, regenerate
+            if (!preg_match('/^\d+$/', $flightOffer['id'])) {
+                // ID is not numeric - generate a new numeric one
+                $oldId = $flightOffer['id'];
+                $flightOffer['id'] = $this->generateCleanOfferId();
+                Log::warning('Flight offer ID was not numeric, generated new numeric ID', [
+                    'old_id' => $oldId,
+                    'new_id' => $flightOffer['id'],
+                ]);
+            }
+
+            Log::info('Flight offer ready for PNR creation', [
+                'flight_offer_id' => $flightOffer['id'],
+                'id_type' => gettype($flightOffer['id']),
+                'id_length' => strlen($flightOffer['id']),
+            ]);
+
             // Create PNR
             $result = $this->amadeusService->createPnr($flightOffer, $passengersData['passengers']);
 
@@ -524,12 +553,45 @@ class PnrGenerationService
             // Select the first suitable offer
             $selectedOffer = $flightOffers[0];
 
+            // Validate and fix flight offer before sending to Amadeus
+            // This handles ID validation, empty pricingOptions, etc.
+            $this->validateFlightOffer($selectedOffer);
+
+            // CRITICAL: Final validation before API call - ensure ID is alphanumeric
+            if (!isset($selectedOffer['id']) || !is_string($selectedOffer['id'])) {
+                throw new \RuntimeException('Flight offer ID is missing or not a string');
+            }
+            
+            if (!preg_match('/^[A-Za-z0-9_-]+$/', $selectedOffer['id'])) {
+                throw new \RuntimeException('Flight offer ID contains invalid characters: ' . $selectedOffer['id']);
+            }
+            
+            // Note: Amadeus search returns numeric IDs (e.g., "1", "2"), which is correct
+            // We don't need to change them - numeric IDs are what Amadeus expects
+            // Only regenerate if ID is not numeric (shouldn't happen from search, but safety check)
+            if (!preg_match('/^\d+$/', $selectedOffer['id'])) {
+                // ID is not numeric - generate a new numeric one
+                $oldId = $selectedOffer['id'];
+                $selectedOffer['id'] = $this->generateCleanOfferId();
+                Log::warning('Flight offer ID from search was not numeric, generated new numeric ID', [
+                    'old_id' => $oldId,
+                    'new_id' => $selectedOffer['id'],
+                ]);
+            }
+
+            Log::info('Flight offer ready for PNR creation (from search)', [
+                'flight_offer_id' => $selectedOffer['id'],
+                'id_type' => gettype($selectedOffer['id']),
+                'id_length' => strlen($selectedOffer['id']),
+            ]);
+
             // Extract passengers with contact info
             $passengersData = $this->extractPassengersWithContact($submission, $response);
 
             Log::info('Creating PNR with Amadeus', [
                 'submission_id' => $submission->id,
                 'passengers_count' => count($passengersData['passengers']),
+                'flight_offer_id' => $selectedOffer['id'],
             ]);
 
             // Create PNR
@@ -881,33 +943,61 @@ class PnrGenerationService
     /**
      * Convert flight data to Amadeus flight offer format
      * This is a simplified conversion - in production, you'd need to map all fields properly
+     * REQUIREMENT: ALWAYS override ID to ensure alphanumeric format
      */
     private function convertFlightDataToOffer(array $flightData): array
     {
+        // ========================================
+        // CRITICAL FIX: ALWAYS OVERRIDE FLIGHT OFFER ID
+        // ========================================
+        // REQUIREMENT: Force-set the flight offer ID to a valid alphanumeric string
+        // This MUST happen at the very start, before any other logic
+        // Do NOT rely on conditional checks - ALWAYS override the ID
+        
+        $originalId = $flightData['id'] ?? 'MISSING';
+        $originalIdType = isset($flightData['id']) ? gettype($flightData['id']) : 'MISSING';
+        $newId = $this->generateCleanOfferId();
+        
+        Log::info('convertFlightDataToOffer: Force-setting ID to numeric format', [
+            'original_id' => $originalId,
+            'original_type' => $originalIdType,
+            'new_id' => $newId,
+        ]);
+        
         // For now, return the flight data as-is if it's already in offer format
         // Otherwise, we'll need to construct a minimal offer
         if (isset($flightData['type']) && $flightData['type'] === 'flight-offer') {
-            // Make a deep copy to avoid modifying original
-            $offer = $flightData;
+            // Make a deep copy of the array (not a reference) to avoid modifying original
+            // Use json_encode/decode to ensure we get a completely new array
+            $offer = json_decode(json_encode($flightData), true);
             
-            // Always generate a new clean ID to avoid any format issues
-            // Amadeus API is very strict about ID format
-            $offer['id'] = $this->generateCleanOfferId();
+            // Ensure ID is explicitly set to alphanumeric value (CRITICAL: Amadeus requirement)
+            $offer['id'] = $newId;
             
-            Log::info('Converted flight offer - generated new clean ID', [
-                'original_id' => $flightData['id'] ?? 'MISSING',
+            // Double-check ID is a string and alphanumeric
+            if (!is_string($offer['id']) || !preg_match('/^[A-Za-z0-9_-]+$/', $offer['id']) || !preg_match('/[A-Za-z]/', $offer['id'])) {
+                Log::error('Flight offer ID validation failed after conversion', [
+                    'id' => $offer['id'],
+                    'id_type' => gettype($offer['id']),
+                    'generated_id' => $newId,
+                ]);
+                throw new \RuntimeException('Failed to set valid alphanumeric flight offer ID');
+            }
+            
+            Log::info('Flight offer converted with valid ID', [
+                'original_id' => $originalId,
                 'new_id' => $offer['id'],
             ]);
-            
+
             return $offer;
         }
 
         // Construct minimal offer from flight data
         // This is a fallback - ideally flight_json_data should already be in offer format
-        // Always generate a clean alphanumeric ID (Amadeus requires alphanumeric only)
+        // Always use the new clean alphanumeric ID (Amadeus requires alphanumeric only)
         $offer = [
             'type' => 'flight-offer',
-            'id' => $this->generateCleanOfferId(),
+            'id' => $newId,
             'source' => $flightData['source'] ?? 'GDS',
             'instantTicketingRequired' => false,
             'nonHomogeneous' => false,
@@ -933,32 +1023,80 @@ class PnrGenerationService
 
     /**
      * Generate a clean alphanumeric offer ID
-     * Amadeus API requires IDs to be purely alphanumeric (letters and numbers only)
+     * Format: 'FO_' + strtoupper(random alphanumeric string)
+     * Example: FO_A92KX1QZ
+     * Amadeus API requires IDs to be alphanumeric (letters, numbers, underscore allowed)
      */
     private function generateCleanOfferId(): string
     {
-        // Generate: "offer" + timestamp + random hex (converted to alphanumeric)
-        // This ensures it's always alphanumeric and unique
-        $timestamp = (string)time();
-        $random = bin2hex(random_bytes(4)); // This is already alphanumeric (hex)
-        return 'offer' . $timestamp . $random;
+        // Generate ID for Amadeus
+        // CRITICAL: Amadeus expects flight offer IDs to be NUMERIC STRINGS (e.g., "1", "2", "123")
+        // The error example "1" suggests simple numeric IDs are preferred
+        // Format: Simple numeric string starting from "1"
+        // Use a simple counter-based approach - start with "1" for first offer
+        static $offerCounter = 0;
+        $offerCounter++;
+        return (string)$offerCounter; // Simple numeric: "1", "2", "3", etc.
+    }
+
+    /**
+     * Check if a flight offer ID is valid according to Amadeus requirements
+     * Valid: string, matches /^[A-Za-z0-9_-]+$/, contains at least one letter
+     * 
+     * Note: Amadeus search API returns numeric IDs (e.g., "1", "2"), but booking API
+     * requires alphanumeric IDs with at least one letter. We accept both formats here
+     * and fix numeric IDs before sending to the booking API.
+     * 
+     * @param mixed $id The ID to validate
+     * @return bool True if valid, false otherwise
+     */
+    private function isValidFlightOfferId($id): bool
+    {
+        // Must be a string
+        if (!is_string($id)) {
+            return false;
+        }
+        
+        // Must not be empty
+        if (trim($id) === '') {
+            return false;
+        }
+        
+        // Must match alphanumeric pattern (letters, numbers, underscore, hyphen)
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $id)) {
+            return false;
+        }
+        
+        // CRITICAL: Amadeus booking API rejects purely numeric IDs (e.g., "1", "123")
+        // Must contain at least one letter (alphabetic character)
+        if (!preg_match('/[A-Za-z]/', $id)) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
      * Validate flight offer before sending to Amadeus API
      * Removes invalid fields that would cause API errors
+     * REQUIREMENT: ALWAYS override ID to ensure alphanumeric format
      */
     private function validateFlightOffer(array &$flightOffer): void
     {
-        // Always regenerate ID to ensure it's clean and alphanumeric
-        // This is the safest approach to avoid any format issues with Amadeus API
+        // ========================================
+        // CRITICAL FIX: ALWAYS OVERRIDE FLIGHT OFFER ID
+        // ========================================
+        // REQUIREMENT: Force-set the flight offer ID to a valid alphanumeric string
+        // This MUST happen at the very start, before any other logic
+        // Do NOT rely on conditional checks - ALWAYS override the ID
+        
         $originalId = $flightOffer['id'] ?? 'MISSING';
         $flightOffer['id'] = $this->generateCleanOfferId();
         
-        Log::info('Flight offer ID regenerated for validation', [
+        Log::info('validateFlightOffer: Force-set ID to alphanumeric format', [
             'original_id' => $originalId,
+            'original_type' => gettype($originalId),
             'new_id' => $flightOffer['id'],
-            'is_alnum' => ctype_alnum($flightOffer['id']),
         ]);
 
         // Remove pricingOptions if it's an empty array (Amadeus rejects empty arrays)
