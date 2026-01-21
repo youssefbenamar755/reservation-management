@@ -156,35 +156,49 @@ class AmadeusService
     public function createPnr(array $flightOffer, array $passengers): array
     {
         // ========================================
-        // CRITICAL FIX: ALWAYS OVERRIDE FLIGHT OFFER ID
+        // CRITICAL: Do NOT overwrite flightOffer['id']
         // ========================================
-        // REQUIREMENT: Force-set the flight offer ID to a valid numeric string
-        // This MUST happen at the very top, before any other logic
-        // Do NOT rely on conditional checks - ALWAYS override the ID
+        // REQUIREMENT: Validate it as string and acceptable pattern; use it as provided
+        // Only generate a new ID if the provided one is invalid
         
-        $originalId = $flightOffer['id'] ?? 'MISSING';
-        $originalIdType = isset($originalId) && $originalId !== 'MISSING' ? gettype($originalId) : 'MISSING';
+        static $offerCounter = 0; // Declare once at the top of the method
         
-        // Generate a valid ID for Amadeus
-        // CRITICAL: Amadeus expects flight offer IDs to be NUMERIC STRINGS (e.g., "1", "2", "123")
-        // The error example "1" suggests simple numeric IDs are preferred
-        // Format: Simple numeric string starting from "1" (incrementing for multiple offers)
-        // Use a simple counter-based approach - start with "1" for first offer
-        static $offerCounter = 0;
-        $offerCounter++;
-        $flightOffer['id'] = (string)$offerCounter; // Simple numeric: "1", "2", "3", etc.
+        $originalId = $flightOffer['id'] ?? null;
         
-        // Validate the generated ID - must be purely numeric string
-        if (!is_string($flightOffer['id']) || !preg_match('/^\d+$/', $flightOffer['id'])) {
-            throw new \RuntimeException('Generated flight offer ID is invalid (must be numeric string): ' . $flightOffer['id']);
+        // Validate the provided ID
+        if (empty($originalId)) {
+            // If ID is missing, generate one
+            $offerCounter++;
+            $flightOffer['id'] = (string)$offerCounter;
+            Log::warning('Flight offer ID was missing, generated new ID', [
+                'generated_id' => $flightOffer['id'],
+            ]);
+        } elseif (!is_string($originalId)) {
+            // If ID is not a string, convert it
+            $flightOffer['id'] = (string)$originalId;
+            Log::warning('Flight offer ID was not a string, converted to string', [
+                'original_id' => $originalId,
+                'original_type' => gettype($originalId),
+                'converted_id' => $flightOffer['id'],
+            ]);
+        } elseif (!preg_match('/^[A-Za-z0-9_-]+$/', $originalId)) {
+            // If ID contains invalid characters, generate a new one
+            $offerCounter++;
+            $flightOffer['id'] = (string)$offerCounter;
+            Log::warning('Flight offer ID contained invalid characters, generated new ID', [
+                'original_id' => $originalId,
+                'generated_id' => $flightOffer['id'],
+            ]);
+        } else {
+            // ID is valid - use it as provided
+            $flightOffer['id'] = $originalId;
         }
 
-        Log::info('Force-set flight offer ID to numeric format', [
-            'original_id' => $originalId,
-            'original_type' => $originalIdType,
-            'new_id' => $flightOffer['id'],
-            'new_id_type' => gettype($flightOffer['id']),
-            'new_id_is_valid' => preg_match('/^\d+$/', $flightOffer['id']),
+        Log::info('Using flight offer ID (validated, not overwritten)', [
+            'flight_offer_id' => $flightOffer['id'],
+            'id_type' => gettype($flightOffer['id']),
+            'id_length' => strlen($flightOffer['id']),
+            'was_provided' => $originalId !== null,
         ]);
 
         $token = $this->getAccessToken();
@@ -212,19 +226,10 @@ class AmadeusService
                 $travelers[] = $traveler;
             }
 
-            // CRITICAL: Ensure flight offer has valid ID before building payload
-            // The ID should already be set correctly above, but double-check and fix if needed
-            // Amadeus requires purely numeric string IDs (e.g., "12345678")
-            if (!isset($flightOffer['id']) || !is_string($flightOffer['id']) || !preg_match('/^\d+$/', $flightOffer['id'])) {
-                // Generate a new simple numeric ID if the current one is invalid
-                static $fallbackCounter = 0;
-                $fallbackCounter++;
-                $oldId = $flightOffer['id'] ?? 'MISSING';
-                $flightOffer['id'] = (string)$fallbackCounter; // Simple numeric: "1", "2", "3", etc.
-                Log::warning('Flight offer ID was invalid, regenerated', [
-                    'old_id' => $oldId,
-                    'new_id' => $flightOffer['id'],
-                ]);
+            // CRITICAL: Final validation - ensure ID is valid before building payload
+            // The ID should already be validated above, but double-check
+            if (!isset($flightOffer['id']) || !is_string($flightOffer['id']) || !preg_match('/^[A-Za-z0-9_-]+$/', $flightOffer['id'])) {
+                throw new \RuntimeException('Flight offer ID is invalid after validation: ' . ($flightOffer['id'] ?? 'MISSING'));
             }
 
             // Build flight order payload - create a DEEP copy of flight offer to avoid any reference issues
@@ -275,9 +280,10 @@ class AmadeusService
                     throw new \RuntimeException("Flight offer ID at index {$index} contains invalid characters: '{$offerId}'");
                 }
                 
-                // Check 4: ID must be purely numeric (Amadeus requirement - despite "AlphaNumeric" error message, example "1" shows numeric)
-                if (!preg_match('/^\d+$/', $offerId)) {
-                    throw new \RuntimeException("Flight offer ID at index {$index} must be purely numeric: '{$offerId}' - Amadeus requires numeric string (e.g., '1', '123')");
+                // Check 4: ID must match acceptable pattern (alphanumeric with underscore/hyphen)
+                // Note: Amadeus accepts alphanumeric IDs, not just numeric
+                if (!preg_match('/^[A-Za-z0-9_-]+$/', $offerId)) {
+                    throw new \RuntimeException("Flight offer ID at index {$index} contains invalid characters: '{$offerId}' - Must be alphanumeric (e.g., '1', 'FO123', 'offer-1')");
                 }
                 
                 // Log the validated ID
@@ -285,7 +291,7 @@ class AmadeusService
                     'index' => $index,
                     'id' => $offerId,
                     'type' => gettype($offerId),
-                    'is_numeric' => preg_match('/^\d+$/', $offerId),
+                    'is_valid' => preg_match('/^[A-Za-z0-9_-]+$/', $offerId),
                 ]);
 
             }

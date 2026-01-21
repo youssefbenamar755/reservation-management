@@ -423,141 +423,106 @@ class FfSubmissionController extends Controller
                 return back()->with('error', 'PNR already exists for this submission. PNR: ' . $submission->pnr);
             }
 
-            // Generate PNR (now returns complete extracted data)
+            // Generate PNR (now returns complete extracted data with used_offer)
             $pnrResult = $pnrService->generatePnr($submission);
 
             // Get extracted data from service result
             $extractedData = $pnrResult['extracted_data'] ?? [];
-            $passengersForPdf = [];
+            $passengers = $extractedData['passengers'] ?? []; // Already normalized format
             
-            // Convert passenger data to format expected by PDF service
-            foreach ($extractedData['passengers'] ?? [] as $passenger) {
-                $passengersForPdf[] = [
-                    'firstName' => $passenger['firstName'] ?? 'PASSENGER',
-                    'lastName' => $passenger['lastName'] ?? 'TEST',
-                    'dateOfBirth' => $passenger['dateOfBirth'] ?? '1990-01-01',
-                ];
-            }
+            // Get the flight offer that was successfully used
+            $usedOffer = $pnrResult['used_offer'] ?? [];
             
-            // If no passengers found, create a default one
-            if (empty($passengersForPdf)) {
-                $passengersForPdf[] = [
-                    'firstName' => 'PASSENGER',
-                    'lastName' => 'TEST',
-                    'dateOfBirth' => '1990-01-01',
-                ];
+            if (empty($usedOffer)) {
+                throw new \RuntimeException('No flight offer available for PDF generation');
             }
+
+            // Get website info
+            $website = $submission->website;
+            $websiteInfo = $website ? [
+                'id' => $website->id,
+                'name' => $website->name,
+                'slug' => $website->slug,
+            ] : null;
+
+            // Generate ONE PDF PER PASSENGER
+            $pdfUrls = [];
+            $pdfPaths = [];
             
-            // Get route and dates from extracted data
-            $route = $extractedData['route'] ?? ['origin' => 'UNKNOWN', 'destination' => 'UNKNOWN'];
-            $dates = $extractedData['dates'] ?? ['departure' => null, 'return' => null];
-
-            // Extract flight data from submission for airline/flight number extraction
-            $payload = $submission->payload ?? [];
-            $response = $payload['response'] ?? [];
-            
-            // Handle case where response is a JSON string
-            if (is_string($response)) {
-                try {
-                    $response = json_decode($response, true);
-                    if (!is_array($response)) {
-                        $response = [];
-                    }
-                } catch (\Exception $e) {
-                    $response = [];
-                }
-            }
-
-            // Extract flight_json_data if available
-            $flightData = null;
-            foreach ($response as $key => $value) {
-                $keyLower = strtolower($key);
-                if (strpos($keyLower, 'flight') !== false && strpos($keyLower, 'json') !== false) {
-                    if (is_string($value)) {
-                        try {
-                            $flightData = json_decode($value, true);
-                        } catch (\Exception $e) {
-                            // Ignore parsing errors
-                        }
-                    } elseif (is_array($value)) {
-                        $flightData = $value;
-                    }
-                    break;
-                }
-            }
-
-            // Also check pnr_data for flight information
-            if (empty($flightData) && isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
-                $flightData = $pnrResult['pnr_data'];
-            }
-
-            // Merge pnr_data into flightData for extraction if available
-            if (empty($flightData) && isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
-                $flightData = $pnrResult['pnr_data'];
-            } elseif (isset($pnrResult['pnr_data']) && is_array($pnrResult['pnr_data'])) {
-                // Merge itineraries if pnr_data has more complete flight info
-                if (isset($pnrResult['pnr_data']['itineraries']) && !empty($pnrResult['pnr_data']['itineraries'])) {
-                    $flightData['itineraries'] = $pnrResult['pnr_data']['itineraries'];
-                }
-                if (isset($pnrResult['pnr_data']['validatingAirlineCodes']) && !empty($pnrResult['pnr_data']['validatingAirlineCodes'])) {
-                    $flightData['validatingAirlineCodes'] = $pnrResult['pnr_data']['validatingAirlineCodes'];
-                }
-            }
-
-            // Generate PDF with all available data
-            // VERIFICATION: This uses DummyTicketPdfService which renders pdf.dummy-ticket template
-            Log::info('Generating PDF using DummyTicketPdfService', [
+            Log::info('Generating PDFs for passengers', [
                 'submission_id' => $submission->id,
-                'service' => 'DummyTicketPdfService',
-                'template' => 'pdf.dummy-ticket',
-                'template_path' => resource_path('views/pdf/dummy-ticket.blade.php'),
-            ]);
-            
-            // PDF service will extract airline and flight number from flightData
-            $pdfPath = $pdfService->generatePdf([
-                'passengers' => $passengersForPdf,
-                'route' => $route,
-                'dates' => $dates,
                 'pnr' => $pnrResult['pnr'],
-                'flightData' => $flightData ?? $response, // Pass flight data for airline/flight extraction
+                'passenger_count' => count($passengers),
             ]);
 
-            // Verify PDF file was created
-            $fullPdfPath = storage_path('app/public/' . $pdfPath);
-            if (!file_exists($fullPdfPath)) {
-                Log::error('PDF file was not created', [
-                    'submission_id' => $submission->id,
-                    'expected_path' => $fullPdfPath,
-                    'pdf_path' => $pdfPath,
-                ]);
-                throw new \RuntimeException('PDF file was not created at: ' . $fullPdfPath);
+            foreach ($passengers as $passenger) {
+                try {
+                    // Generate PDF for this passenger
+                    $pdfPath = $pdfService->generate(
+                        $pnrResult['pnr'],
+                        $usedOffer,
+                        $passenger,
+                        $websiteInfo
+                    );
+
+                    // Verify PDF file was created
+                    $fullPdfPath = storage_path('app/public/' . $pdfPath);
+                    if (!file_exists($fullPdfPath)) {
+                        Log::error('PDF file was not created', [
+                            'submission_id' => $submission->id,
+                            'passenger' => $passenger['first_name'] . ' ' . $passenger['last_name'],
+                            'expected_path' => $fullPdfPath,
+                            'pdf_path' => $pdfPath,
+                        ]);
+                        continue; // Skip this passenger but continue with others
+                    }
+
+                    $pdfPaths[] = $pdfPath;
+                    $pdfUrls[] = [
+                        'passenger_name' => trim(($passenger['last_name'] ?? '') . ' ' . ($passenger['first_name'] ?? '')),
+                        'url' => asset('storage/' . $pdfPath),
+                    ];
+
+                    Log::info('PDF generated for passenger', [
+                        'submission_id' => $submission->id,
+                        'passenger' => $passenger['first_name'] . ' ' . $passenger['last_name'],
+                        'pdf_path' => $pdfPath,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to generate PDF for passenger', [
+                        'submission_id' => $submission->id,
+                        'passenger' => $passenger['first_name'] . ' ' . $passenger['last_name'],
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Continue with other passengers
+                }
             }
 
-            // Update submission
+            if (empty($pdfPaths)) {
+                throw new \RuntimeException('Failed to generate any PDFs for passengers');
+            }
+
+            // Update submission with first PDF path (for backward compatibility)
             $submission->update([
                 'pnr' => $pnrResult['pnr'],
                 'pnr_generated_at' => now(),
-                'pnr_pdf_path' => $pdfPath,
+                'pnr_pdf_path' => $pdfPaths[0], // Store first PDF path
                 'pnr_source' => $pnrResult['source'],
             ]);
 
-            // Generate PDF URL for frontend
-            $pdfUrl = asset('storage/' . $pdfPath);
-
-            Log::info('PNR generated successfully', [
+            Log::info('PNR generated successfully with PDFs', [
                 'submission_id' => $submission->id,
                 'pnr' => $pnrResult['pnr'],
                 'source' => $pnrResult['source'],
-                'pdf_path' => $pdfPath,
-                'pdf_url' => $pdfUrl,
-                'pdf_file_exists' => file_exists($fullPdfPath),
+                'pdf_count' => count($pdfPaths),
+                'pdf_urls' => $pdfUrls,
             ]);
 
-            // Return with success message and PDF URL for frontend
+            // Return with success message and PDF URLs for frontend
             return back()->with([
-                'success' => 'PNR generated successfully: ' . $pnrResult['pnr'],
-                'pdf_url' => $pdfUrl,
+                'success' => 'PNR generated successfully: ' . $pnrResult['pnr'] . '. Generated ' . count($pdfPaths) . ' PDF(s).',
                 'pnr' => $pnrResult['pnr'],
+                'pdfs' => $pdfUrls, // Array of {passenger_name, url}
             ]);
         } catch (\Throwable $e) {
             Log::error('Failed to generate PNR', [

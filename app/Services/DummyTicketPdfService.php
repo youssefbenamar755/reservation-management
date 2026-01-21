@@ -11,36 +11,32 @@ use Illuminate\Support\Facades\View;
 class DummyTicketPdfService
 {
     /**
-     * Generate a dummy ticket PDF
+     * Generate a dummy ticket PDF for a single passenger
      *
-     * @param array $data [
-     *   'passengers' => [],
-     *   'route' => ['origin' => '', 'destination' => ''],
-     *   'dates' => ['departure' => '', 'return' => ''],
-     *   'pnr' => '',
-     *   'airline' => '',
-     *   'flightNumber' => '',
-     *   'flightData' => [] // Optional: Full flight data for extraction
-     * ]
+     * @param string $pnr PNR code
+     * @param array $flightOffer The flight offer used for PNR creation
+     * @param array $passenger Single passenger: ['title','first_name','last_name','email','phone']
+     * @param array $websiteInfo Website information (optional)
      * @return string File path relative to storage/app/public
      */
-    public function generatePdf(array $data): string
+    public function generate(string $pnr, array $flightOffer, array $passenger, ?array $websiteInfo = null): string
     {
         try {
-            $passengers = $data['passengers'] ?? [];
-            $route = $data['route'] ?? [];
-            $dates = $data['dates'] ?? [];
-            $pnr = $data['pnr'] ?? 'N/A';
-            $airline = $data['airline'] ?? null;
-            $flightNumber = $data['flightNumber'] ?? null;
-            $flightData = $data['flightData'] ?? null;
+            // Extract passenger info
+            $firstName = strtoupper($passenger['first_name'] ?? 'PASSENGER');
+            $lastName = strtoupper($passenger['last_name'] ?? 'TEST');
+            $title = strtoupper($passenger['title'] ?? 'MR');
+            $email = $passenger['email'] ?? '';
+            $phone = $passenger['phone'] ?? '';
 
-            // Extract airline and flight number from flightData if not provided
-            if (empty($airline) || empty($flightNumber)) {
-                $extracted = $this->extractAirlineAndFlightNumber($flightData ?? $data);
-                $airline = $airline ?? $extracted['airline'] ?? null;
-                $flightNumber = $flightNumber ?? $extracted['flightNumber'] ?? null;
-            }
+            // Extract route and dates from flight offer
+            $route = $this->extractRouteFromFlightOffer($flightOffer);
+            $dates = $this->extractDatesFromFlightOffer($flightOffer);
+
+            // Extract airline and flight number from flight offer
+            $extracted = $this->extractAirlineAndFlightNumber($flightOffer);
+            $airline = $extracted['airline'] ?? null;
+            $flightNumber = $extracted['flightNumber'] ?? null;
 
             // Format dates for display
             $formattedDates = [
@@ -48,22 +44,24 @@ class DummyTicketPdfService
                 'return' => !empty($dates['return']) ? $this->formatDateForDisplay($dates['return']) : null,
             ];
 
-            // Format passenger dates
-            $formattedPassengerDates = [];
-            foreach ($passengers as $index => $passenger) {
-                $dob = $passenger['dateOfBirth'] ?? $passenger['date_of_birth'] ?? null;
-                $formattedPassengerDates[$index] = $this->formatDateForDisplay($dob);
-            }
+            // Format passenger data for template (single passenger)
+            $passengers = [[
+                'firstName' => $firstName,
+                'lastName' => $lastName,
+                'title' => $title,
+                'dateOfBirth' => null,
+            ]];
+
+            $formattedPassengerDates = [null]; // No DOB for now
 
             // Booking date (current date)
             $bookingDate = now()->format('F j, Y');
             $generatedAt = now()->format('F j, Y \a\t g:i A');
 
             // Normalize flight data into trips structure (for multi-segment support)
-            $trips = $this->normalizeFlightDataToTrips($flightData, $route, $dates, $airline, $flightNumber);
+            $trips = $this->normalizeFlightDataToTrips($flightOffer, $route, $dates, $airline, $flightNumber);
 
             // Generate HTML using Blade template
-            // VERIFICATION: Ensure we're using the correct template (dummy-ticket.blade.php)
             $templateName = 'pdf.dummy-ticket';
             $templatePath = resource_path('views/pdf/dummy-ticket.blade.php');
             
@@ -76,10 +74,10 @@ class DummyTicketPdfService
                 throw new \RuntimeException('PDF template not found: ' . $templateName);
             }
             
-            Log::info('Using PDF template for dummy ticket', [
+            Log::info('Generating PDF for single passenger', [
                 'template' => $templateName,
-                'template_path' => $templatePath,
-                'template_exists' => file_exists($templatePath),
+                'passenger' => $firstName . ' ' . $lastName,
+                'pnr' => $pnr,
             ]);
             
             $html = View::make($templateName, [
@@ -93,7 +91,7 @@ class DummyTicketPdfService
                 'flightNumber' => $flightNumber,
                 'bookingDate' => $bookingDate,
                 'generatedAt' => $generatedAt,
-                'trips' => $trips, // Pass normalized trips to template
+                'trips' => $trips,
             ])->render();
 
             // Configure Dompdf
@@ -109,22 +107,14 @@ class DummyTicketPdfService
             $dompdf->render();
 
             // Generate filename - format: Itinerary-{passengerName} - {pnr}.pdf
-            $passengerName = 'Passenger';
-            if (!empty($passengers) && isset($passengers[0])) {
-                $firstPassenger = $passengers[0];
-                $firstName = $firstPassenger['firstName'] ?? $firstPassenger['first_name'] ?? '';
-                $lastName = $firstPassenger['lastName'] ?? $firstPassenger['last_name'] ?? '';
-                if (!empty($firstName) || !empty($lastName)) {
-                    $passengerName = trim(($lastName ?: '') . ' ' . ($firstName ?: ''));
-                    if (empty($passengerName)) {
-                        $passengerName = 'Passenger';
-                    }
-                }
+            $passengerName = trim($lastName . ' ' . $firstName);
+            if (empty($passengerName)) {
+                $passengerName = 'Passenger';
             }
             
-            // Sanitize passenger name for filesystem (remove special characters, keep only alphanumeric, spaces, hyphens, underscores)
+            // Sanitize passenger name for filesystem
             $passengerName = preg_replace('/[^a-zA-Z0-9\s\-_]/', '', $passengerName);
-            $passengerName = preg_replace('/\s+/', '-', trim($passengerName)); // Replace spaces with hyphens
+            $passengerName = preg_replace('/\s+/', '-', trim($passengerName));
             $passengerName = strtoupper($passengerName);
             
             // Generate filename: Itinerary-{passengerName} - {pnr}.pdf
@@ -140,9 +130,10 @@ class DummyTicketPdfService
             $fullPath = storage_path('app/public/' . $filename);
             file_put_contents($fullPath, $dompdf->output());
 
-            Log::info('Dummy ticket PDF generated', [
+            Log::info('Dummy ticket PDF generated for passenger', [
                 'filename' => $filename,
                 'pnr' => $pnr,
+                'passenger' => $firstName . ' ' . $lastName,
                 'full_path' => $fullPath,
             ]);
 
@@ -152,10 +143,105 @@ class DummyTicketPdfService
             Log::error('Failed to generate ticket PDF', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'data' => $data,
+                'pnr' => $pnr,
+                'passenger' => $passenger,
             ]);
             throw new \RuntimeException('Failed to generate ticket PDF: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * Generate a dummy ticket PDF (legacy method for backward compatibility)
+     * @deprecated Use generate() instead
+     */
+    public function generatePdf(array $data): string
+    {
+        // Extract first passenger for legacy support
+        $passengers = $data['passengers'] ?? [];
+        if (empty($passengers)) {
+            throw new \RuntimeException('No passengers provided');
+        }
+
+        $firstPassenger = $passengers[0];
+        $pnr = $data['pnr'] ?? 'N/A';
+        
+        // Convert to normalized format
+        $normalizedPassenger = [
+            'title' => $firstPassenger['title'] ?? 'MR',
+            'first_name' => $firstPassenger['firstName'] ?? $firstPassenger['first_name'] ?? 'PASSENGER',
+            'last_name' => $firstPassenger['lastName'] ?? $firstPassenger['last_name'] ?? 'TEST',
+            'email' => $firstPassenger['email'] ?? $firstPassenger['contact']['emailAddress'] ?? '',
+            'phone' => $firstPassenger['phone'] ?? '',
+        ];
+
+        // Create flight offer from data
+        $flightOffer = $data['flightData'] ?? $data;
+        
+        return $this->generate($pnr, $flightOffer, $normalizedPassenger);
+    }
+
+    /**
+     * Extract route from flight offer
+     */
+    private function extractRouteFromFlightOffer(array $flightOffer): array
+    {
+        $route = ['origin' => null, 'destination' => null];
+        
+        if (!empty($flightOffer['itineraries']) && is_array($flightOffer['itineraries'])) {
+            $firstItinerary = $flightOffer['itineraries'][0];
+            $segments = $firstItinerary['segments'] ?? [];
+            
+            if (!empty($segments)) {
+                $route['origin'] = $segments[0]['departure']['iataCode'] ?? null;
+                
+                $lastSegment = $segments[count($segments) - 1];
+                $route['destination'] = $lastSegment['arrival']['iataCode'] ?? null;
+            }
+        }
+
+        return $route;
+    }
+
+    /**
+     * Extract dates from flight offer
+     */
+    private function extractDatesFromFlightOffer(array $flightOffer): array
+    {
+        $dates = ['departure' => null, 'return' => null];
+        
+        if (!empty($flightOffer['itineraries']) && is_array($flightOffer['itineraries'])) {
+            // Departure date from first itinerary
+            if (!empty($flightOffer['itineraries'][0])) {
+                $firstItinerary = $flightOffer['itineraries'][0];
+                $segments = $firstItinerary['segments'] ?? [];
+                
+                if (!empty($segments) && !empty($segments[0]['departure']['at'])) {
+                    try {
+                        $date = new \DateTime($segments[0]['departure']['at']);
+                        $dates['departure'] = $date->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Ignore
+                    }
+                }
+            }
+            
+            // Return date from second itinerary (if exists)
+            if (!empty($flightOffer['itineraries'][1])) {
+                $returnItinerary = $flightOffer['itineraries'][1];
+                $segments = $returnItinerary['segments'] ?? [];
+                
+                if (!empty($segments) && !empty($segments[0]['departure']['at'])) {
+                    try {
+                        $date = new \DateTime($segments[0]['departure']['at']);
+                        $dates['return'] = $date->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Ignore
+                    }
+                }
+            }
+        }
+
+        return $dates;
     }
 
     /**

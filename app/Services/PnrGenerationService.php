@@ -20,8 +20,9 @@ class PnrGenerationService
      *   'pnr' => string,
      *   'pnr_data' => array,
      *   'source' => 'amadeus_direct'|'amadeus_search',
+     *   'used_offer' => array, // The flight offer that was successfully used
      *   'extracted_data' => [
-     *     'passengers' => array,
+     *     'passengers' => array, // Normalized: [['title','first_name','last_name','email','phone'], ...]
      *     'route' => ['origin' => string, 'destination' => string],
      *     'dates' => ['departure' => string, 'return' => string|null],
      *     'email' => string|null,
@@ -62,14 +63,21 @@ class PnrGenerationService
             'response_is_empty' => empty($response),
         ]);
 
-        // CASE DETECTION: Check if flight_json_data exists
-        $flightJsonData = $this->extractFlightJsonData($response);
+        // Check if website is reservationpourvisa (always search first)
+        $website = $submission->website;
+        $isReservationPourVisa = $website && (
+            stripos($website->name, 'reservationpourvisa') !== false ||
+            stripos($website->slug, 'reservationpourvisa') !== false
+        );
+
+        // CASE DETECTION: Check if flight_json_data exists AND not reservationpourvisa
+        $flightJsonData = $isReservationPourVisa ? null : $this->extractFlightJsonData($response);
 
         if ($flightJsonData) {
-            // CASE A: Direct PNR creation from flight_json_data
+            // CASE A: Direct PNR creation from flight_json_data (with fallback)
             return $this->createPnrFromFlightData($flightJsonData, $submission, $response);
         } else {
-            // CASE B: Search for flights first, then create PNR
+            // CASE B: Search for flights first, then create PNR (with fallback)
             return $this->createPnrFromFormFields($submission, $response);
         }
     }
@@ -349,12 +357,12 @@ class PnrGenerationService
     }
 
     /**
-     * CASE A: Create PNR directly from flight_json_data
+     * CASE A: Create PNR directly from flight_json_data (with fallback to search)
      */
     private function createPnrFromFlightData(array $flightData, FfSubmission $submission, array $response): array
     {
         try {
-            // Extract passengers from response
+            // Extract passengers from response (normalized format)
             $passengersData = $this->extractPassengersWithContact($submission, $response);
 
             // Use the first flight offer from flight_json_data
@@ -365,53 +373,107 @@ class PnrGenerationService
             // Validate flight offer before sending to Amadeus
             $this->validateFlightOffer($flightOffer);
 
-            // CRITICAL: Final validation before API call - ensure ID is numeric
-            if (!isset($flightOffer['id']) || !is_string($flightOffer['id'])) {
-                throw new \RuntimeException('Flight offer ID is missing or not a string');
-            }
+            // Try to create PNR with the provided offer
+            $maxAttempts = 10;
+            $lastError = null;
             
-            if (!preg_match('/^[A-Za-z0-9_-]+$/', $flightOffer['id'])) {
-                throw new \RuntimeException('Flight offer ID contains invalid characters: ' . $flightOffer['id']);
+            for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+                try {
+                    Log::info('Attempting PNR creation', [
+                        'submission_id' => $submission->id,
+                        'attempt' => $attempt + 1,
+                        'flight_offer_id' => $flightOffer['id'] ?? 'MISSING',
+                    ]);
+
+                    // Create PNR
+                    $result = $this->amadeusService->createPnr($flightOffer, $passengersData['passengers']);
+
+                    // Extract route and dates from flight data
+                    $route = $this->extractRouteFromFlightData($flightData);
+                    $dates = $this->extractDatesFromFlightData($flightData);
+
+                    return [
+                        'pnr' => $result['pnr'],
+                        'pnr_data' => $result['data'] ?? [],
+                        'source' => 'amadeus_direct',
+                        'used_offer' => $flightOffer,
+                        'extracted_data' => [
+                            'passengers' => $passengersData['normalized_passengers'],
+                            'route' => $route,
+                            'dates' => $dates,
+                            'email' => $passengersData['email'],
+                            'phone' => $passengersData['phone'],
+                        ],
+                    ];
+                } catch (\Exception $e) {
+                    $lastError = $e;
+                    Log::warning('PNR creation attempt failed', [
+                        'submission_id' => $submission->id,
+                        'attempt' => $attempt + 1,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    // If this was the first attempt and we have flight_json_data, try searching for alternatives
+                    if ($attempt === 0) {
+                        // Extract search criteria from flight data
+                        $searchParams = $this->extractSearchParamsFromFlightData($flightData, $response);
+                        
+                        if (!empty($searchParams)) {
+                            Log::info('Searching for alternative flight offers', [
+                                'submission_id' => $submission->id,
+                                'search_params' => $searchParams,
+                            ]);
+
+                            $alternativeOffers = $this->amadeusService->searchFlights($searchParams);
+                            
+                            if (!empty($alternativeOffers)) {
+                                // Try each alternative offer
+                                foreach ($alternativeOffers as $index => $altOffer) {
+                                    if ($index >= $maxAttempts - 1) {
+                                        break; // Don't exceed max attempts
+                                    }
+                                    
+                                    try {
+                                        $this->validateFlightOffer($altOffer);
+                                        $result = $this->amadeusService->createPnr($altOffer, $passengersData['passengers']);
+                                        
+                                        // Success! Extract route and dates
+                                        $route = $this->extractRouteFromFlightData($altOffer);
+                                        $dates = $this->extractDatesFromFlightData($altOffer);
+
+                                        return [
+                                            'pnr' => $result['pnr'],
+                                            'pnr_data' => $result['data'] ?? [],
+                                            'source' => 'amadeus_search_fallback',
+                                            'used_offer' => $altOffer,
+                                            'extracted_data' => [
+                                                'passengers' => $passengersData['normalized_passengers'],
+                                                'route' => $route,
+                                                'dates' => $dates,
+                                                'email' => $passengersData['email'],
+                                                'phone' => $passengersData['phone'],
+                                            ],
+                                        ];
+                                    } catch (\Exception $altError) {
+                                        Log::warning('Alternative offer failed', [
+                                            'submission_id' => $submission->id,
+                                            'offer_index' => $index,
+                                            'error' => $altError->getMessage(),
+                                        ]);
+                                        continue; // Try next offer
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            
-            // Note: Amadeus actually requires purely numeric IDs (despite "AlphaNumeric" error message)
-            // The generateCleanOfferId() already returns numeric, so this check is not needed
-            // But we keep it for validation - if ID is not numeric, regenerate
-            if (!preg_match('/^\d+$/', $flightOffer['id'])) {
-                // ID is not numeric - generate a new numeric one
-                $oldId = $flightOffer['id'];
-                $flightOffer['id'] = $this->generateCleanOfferId();
-                Log::warning('Flight offer ID was not numeric, generated new numeric ID', [
-                    'old_id' => $oldId,
-                    'new_id' => $flightOffer['id'],
-                ]);
-            }
 
-            Log::info('Flight offer ready for PNR creation', [
-                'flight_offer_id' => $flightOffer['id'],
-                'id_type' => gettype($flightOffer['id']),
-                'id_length' => strlen($flightOffer['id']),
-            ]);
-
-            // Create PNR
-            $result = $this->amadeusService->createPnr($flightOffer, $passengersData['passengers']);
-
-            // Extract route and dates from flight data
-            $route = $this->extractRouteFromFlightData($flightData);
-            $dates = $this->extractDatesFromFlightData($flightData);
-
-            return [
-                'pnr' => $result['pnr'],
-                'pnr_data' => $result['data'] ?? [],
-                'source' => 'amadeus_direct',
-                'extracted_data' => [
-                    'passengers' => $passengersData['passengers'],
-                    'route' => $route,
-                    'dates' => $dates,
-                    'email' => $passengersData['email'],
-                    'phone' => $passengersData['phone'],
-                ],
-            ];
+            // All attempts failed
+            throw new \RuntimeException(
+                'Failed to create PNR after ' . $maxAttempts . ' attempts. Last error: ' . 
+                ($lastError ? $lastError->getMessage() : 'Unknown error')
+            );
         } catch (\Exception $e) {
             Log::error('Failed to create PNR from flight data', [
                 'submission_id' => $submission->id,
@@ -550,71 +612,65 @@ class PnrGenerationService
                 'offers_count' => count($flightOffers),
             ]);
 
-            // Select the first suitable offer
-            $selectedOffer = $flightOffers[0];
-
-            // Validate and fix flight offer before sending to Amadeus
-            // This handles ID validation, empty pricingOptions, etc.
-            $this->validateFlightOffer($selectedOffer);
-
-            // CRITICAL: Final validation before API call - ensure ID is alphanumeric
-            if (!isset($selectedOffer['id']) || !is_string($selectedOffer['id'])) {
-                throw new \RuntimeException('Flight offer ID is missing or not a string');
-            }
-            
-            if (!preg_match('/^[A-Za-z0-9_-]+$/', $selectedOffer['id'])) {
-                throw new \RuntimeException('Flight offer ID contains invalid characters: ' . $selectedOffer['id']);
-            }
-            
-            // Note: Amadeus search returns numeric IDs (e.g., "1", "2"), which is correct
-            // We don't need to change them - numeric IDs are what Amadeus expects
-            // Only regenerate if ID is not numeric (shouldn't happen from search, but safety check)
-            if (!preg_match('/^\d+$/', $selectedOffer['id'])) {
-                // ID is not numeric - generate a new numeric one
-                $oldId = $selectedOffer['id'];
-                $selectedOffer['id'] = $this->generateCleanOfferId();
-                Log::warning('Flight offer ID from search was not numeric, generated new numeric ID', [
-                    'old_id' => $oldId,
-                    'new_id' => $selectedOffer['id'],
-                ]);
-            }
-
-            Log::info('Flight offer ready for PNR creation (from search)', [
-                'flight_offer_id' => $selectedOffer['id'],
-                'id_type' => gettype($selectedOffer['id']),
-                'id_length' => strlen($selectedOffer['id']),
-            ]);
-
-            // Extract passengers with contact info
+            // Extract passengers with contact info (normalized format)
             $passengersData = $this->extractPassengersWithContact($submission, $response);
 
-            Log::info('Creating PNR with Amadeus', [
-                'submission_id' => $submission->id,
-                'passengers_count' => count($passengersData['passengers']),
-                'flight_offer_id' => $selectedOffer['id'],
-            ]);
+            // Try offers in order until one succeeds
+            $maxAttempts = min(10, count($flightOffers));
+            $lastError = null;
 
-            // Create PNR
-            $result = $this->amadeusService->createPnr($selectedOffer, $passengersData['passengers']);
+            for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+                $selectedOffer = $flightOffers[$attempt];
 
-            return [
-                'pnr' => $result['pnr'],
-                'pnr_data' => $result['data'] ?? [],
-                'source' => 'amadeus_search',
-                'extracted_data' => [
-                    'passengers' => $passengersData['passengers'],
-                    'route' => [
-                        'origin' => $flightParams['originLocationCode'],
-                        'destination' => $flightParams['destinationLocationCode'],
-                    ],
-                    'dates' => [
-                        'departure' => $flightParams['departureDate'],
-                        'return' => $flightParams['returnDate'] ?? null,
-                    ],
-                    'email' => $passengersData['email'],
-                    'phone' => $passengersData['phone'],
-                ],
-            ];
+                try {
+                    // Validate flight offer before sending to Amadeus
+                    $this->validateFlightOffer($selectedOffer);
+
+                    Log::info('Attempting PNR creation with offer', [
+                        'submission_id' => $submission->id,
+                        'attempt' => $attempt + 1,
+                        'flight_offer_id' => $selectedOffer['id'] ?? 'MISSING',
+                    ]);
+
+                    // Create PNR
+                    $result = $this->amadeusService->createPnr($selectedOffer, $passengersData['passengers']);
+
+                    return [
+                        'pnr' => $result['pnr'],
+                        'pnr_data' => $result['data'] ?? [],
+                        'source' => 'amadeus_search',
+                        'used_offer' => $selectedOffer,
+                        'extracted_data' => [
+                            'passengers' => $passengersData['normalized_passengers'],
+                            'route' => [
+                                'origin' => $flightParams['originLocationCode'],
+                                'destination' => $flightParams['destinationLocationCode'],
+                            ],
+                            'dates' => [
+                                'departure' => $flightParams['departureDate'],
+                                'return' => $flightParams['returnDate'] ?? null,
+                            ],
+                            'email' => $passengersData['email'],
+                            'phone' => $passengersData['phone'],
+                        ],
+                    ];
+                } catch (\Exception $e) {
+                    $lastError = $e;
+                    Log::warning('PNR creation attempt failed', [
+                        'submission_id' => $submission->id,
+                        'attempt' => $attempt + 1,
+                        'flight_offer_id' => $selectedOffer['id'] ?? 'MISSING',
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Continue to next offer
+                }
+            }
+
+            // All attempts failed
+            throw new \RuntimeException(
+                'Failed to create PNR after trying ' . $maxAttempts . ' offers. Last error: ' . 
+                ($lastError ? $lastError->getMessage() : 'Unknown error')
+            );
         } catch (\Exception $e) {
             Log::error('Failed to create PNR from form fields', [
                 'submission_id' => $submission->id,
@@ -862,10 +918,13 @@ class PnrGenerationService
 
     /**
      * Extract passengers from submission with contact information
+     * Returns normalized format: [['title','first_name','last_name','email','phone'], ...] (max 9)
+     * Also returns Amadeus format for API calls
      */
     private function extractPassengersWithContact(FfSubmission $submission, array $response): array
     {
-        $passengers = [];
+        $normalizedPassengers = [];
+        $amadeusPassengers = [];
         $email = $submission->email;
         $phone = null;
 
@@ -897,9 +956,30 @@ class PnrGenerationService
             if ($hasFirstName || $hasLastName) {
                 $firstName = strtoupper(trim($value['first_name'] ?? $value['firstname'] ?? ''));
                 $lastName = strtoupper(trim($value['last_name'] ?? $value['lastname'] ?? ''));
+                $title = strtoupper(trim($value['title'] ?? $value['salutation'] ?? 'MR'));
+                
+                // Validate title
+                if (!in_array($title, ['MR', 'MS', 'MRS', 'CHD'])) {
+                    $title = 'MR';
+                }
 
                 if (!empty($firstName) && !empty($lastName)) {
-                    $passengers[] = [
+                    // Stop at 9 passengers
+                    if (count($normalizedPassengers) >= 9) {
+                        break;
+                    }
+
+                    // Normalized format for PDF generation
+                    $normalizedPassengers[] = [
+                        'title' => $title,
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'email' => $email ?? '',
+                        'phone' => $phone ?? '',
+                    ];
+
+                    // Amadeus format for API calls
+                    $amadeusPassengers[] = [
                         'firstName' => $firstName,
                         'lastName' => $lastName,
                         'dateOfBirth' => $value['date_of_birth'] ?? $value['dateOfBirth'] ?? null,
@@ -917,8 +997,16 @@ class PnrGenerationService
         }
 
         // If no passengers found, create a default one
-        if (empty($passengers)) {
-            $passengers[] = [
+        if (empty($normalizedPassengers)) {
+            $normalizedPassengers[] = [
+                'title' => 'MR',
+                'first_name' => 'PASSENGER',
+                'last_name' => 'TEST',
+                'email' => $email ?? 'test@example.com',
+                'phone' => $phone ?? '',
+            ];
+            
+            $amadeusPassengers[] = [
                 'firstName' => 'PASSENGER',
                 'lastName' => 'TEST',
                 'dateOfBirth' => null,
@@ -934,7 +1022,8 @@ class PnrGenerationService
         }
 
         return [
-            'passengers' => $passengers,
+            'passengers' => $amadeusPassengers, // For Amadeus API
+            'normalized_passengers' => $normalizedPassengers, // For PDF generation
             'email' => $email,
             'phone' => $phone,
         ];
@@ -943,26 +1032,47 @@ class PnrGenerationService
     /**
      * Convert flight data to Amadeus flight offer format
      * This is a simplified conversion - in production, you'd need to map all fields properly
-     * REQUIREMENT: ALWAYS override ID to ensure alphanumeric format
+     * REQUIREMENT: Do NOT overwrite ID - validate and use as provided
      */
     private function convertFlightDataToOffer(array $flightData): array
     {
         // ========================================
-        // CRITICAL FIX: ALWAYS OVERRIDE FLIGHT OFFER ID
+        // CRITICAL: Do NOT overwrite flightOffer['id']
         // ========================================
-        // REQUIREMENT: Force-set the flight offer ID to a valid alphanumeric string
-        // This MUST happen at the very start, before any other logic
-        // Do NOT rely on conditional checks - ALWAYS override the ID
+        // REQUIREMENT: Validate it as string and acceptable pattern; use it as provided
+        // Only generate a new ID if the provided one is invalid or missing
         
-        $originalId = $flightData['id'] ?? 'MISSING';
-        $originalIdType = isset($flightData['id']) ? gettype($flightData['id']) : 'MISSING';
-        $newId = $this->generateCleanOfferId();
+        $originalId = $flightData['id'] ?? null;
         
-        Log::info('convertFlightDataToOffer: Force-setting ID to numeric format', [
-            'original_id' => $originalId,
-            'original_type' => $originalIdType,
-            'new_id' => $newId,
-        ]);
+        // Validate the provided ID
+        if (empty($originalId)) {
+            // If ID is missing, generate one
+            $newId = $this->generateCleanOfferId();
+            Log::warning('convertFlightDataToOffer: ID was missing, generated new ID', [
+                'generated_id' => $newId,
+            ]);
+        } elseif (!is_string($originalId)) {
+            // If ID is not a string, convert it
+            $newId = (string)$originalId;
+            Log::warning('convertFlightDataToOffer: ID was not a string, converted to string', [
+                'original_id' => $originalId,
+                'original_type' => gettype($originalId),
+                'converted_id' => $newId,
+            ]);
+        } elseif (!preg_match('/^[A-Za-z0-9_-]+$/', $originalId)) {
+            // If ID contains invalid characters, generate a new one
+            $newId = $this->generateCleanOfferId();
+            Log::warning('convertFlightDataToOffer: ID contained invalid characters, generated new ID', [
+                'original_id' => $originalId,
+                'generated_id' => $newId,
+            ]);
+        } else {
+            // ID is valid - use it as provided
+            $newId = $originalId;
+            Log::info('convertFlightDataToOffer: Using provided ID', [
+                'id' => $newId,
+            ]);
+        }
         
         // For now, return the flight data as-is if it's already in offer format
         // Otherwise, we'll need to construct a minimal offer
@@ -971,22 +1081,12 @@ class PnrGenerationService
             // Use json_encode/decode to ensure we get a completely new array
             $offer = json_decode(json_encode($flightData), true);
             
-            // Ensure ID is explicitly set to alphanumeric value (CRITICAL: Amadeus requirement)
+            // Set ID (validated above)
             $offer['id'] = $newId;
             
-            // Double-check ID is a string and alphanumeric
-            if (!is_string($offer['id']) || !preg_match('/^[A-Za-z0-9_-]+$/', $offer['id']) || !preg_match('/[A-Za-z]/', $offer['id'])) {
-                Log::error('Flight offer ID validation failed after conversion', [
-                    'id' => $offer['id'],
-                    'id_type' => gettype($offer['id']),
-                    'generated_id' => $newId,
-                ]);
-                throw new \RuntimeException('Failed to set valid alphanumeric flight offer ID');
-            }
-            
-            Log::info('Flight offer converted with valid ID', [
+            Log::info('Flight offer converted with validated ID', [
                 'original_id' => $originalId,
-                'new_id' => $offer['id'],
+                'final_id' => $offer['id'],
             ]);
 
             return $offer;
@@ -994,7 +1094,7 @@ class PnrGenerationService
 
         // Construct minimal offer from flight data
         // This is a fallback - ideally flight_json_data should already be in offer format
-        // Always use the new clean alphanumeric ID (Amadeus requires alphanumeric only)
+        // Use validated ID
         $offer = [
             'type' => 'flight-offer',
             'id' => $newId,
@@ -1079,25 +1179,47 @@ class PnrGenerationService
     /**
      * Validate flight offer before sending to Amadeus API
      * Removes invalid fields that would cause API errors
-     * REQUIREMENT: ALWAYS override ID to ensure alphanumeric format
+     * REQUIREMENT: Do NOT overwrite ID - validate and use as provided
      */
     private function validateFlightOffer(array &$flightOffer): void
     {
         // ========================================
-        // CRITICAL FIX: ALWAYS OVERRIDE FLIGHT OFFER ID
+        // CRITICAL: Do NOT overwrite flightOffer['id']
         // ========================================
-        // REQUIREMENT: Force-set the flight offer ID to a valid alphanumeric string
-        // This MUST happen at the very start, before any other logic
-        // Do NOT rely on conditional checks - ALWAYS override the ID
+        // REQUIREMENT: Validate it as string and acceptable pattern; use it as provided
+        // Only generate a new ID if the provided one is invalid or missing
         
-        $originalId = $flightOffer['id'] ?? 'MISSING';
-        $flightOffer['id'] = $this->generateCleanOfferId();
+        $originalId = $flightOffer['id'] ?? null;
         
-        Log::info('validateFlightOffer: Force-set ID to alphanumeric format', [
-            'original_id' => $originalId,
-            'original_type' => gettype($originalId),
-            'new_id' => $flightOffer['id'],
-        ]);
+        // Validate the provided ID
+        if (empty($originalId)) {
+            // If ID is missing, generate one
+            $flightOffer['id'] = $this->generateCleanOfferId();
+            Log::warning('validateFlightOffer: ID was missing, generated new ID', [
+                'generated_id' => $flightOffer['id'],
+            ]);
+        } elseif (!is_string($originalId)) {
+            // If ID is not a string, convert it
+            $flightOffer['id'] = (string)$originalId;
+            Log::warning('validateFlightOffer: ID was not a string, converted to string', [
+                'original_id' => $originalId,
+                'original_type' => gettype($originalId),
+                'converted_id' => $flightOffer['id'],
+            ]);
+        } elseif (!preg_match('/^[A-Za-z0-9_-]+$/', $originalId)) {
+            // If ID contains invalid characters, generate a new one
+            $flightOffer['id'] = $this->generateCleanOfferId();
+            Log::warning('validateFlightOffer: ID contained invalid characters, generated new ID', [
+                'original_id' => $originalId,
+                'generated_id' => $flightOffer['id'],
+            ]);
+        } else {
+            // ID is valid - use it as provided
+            $flightOffer['id'] = $originalId;
+            Log::info('validateFlightOffer: Using provided ID', [
+                'id' => $flightOffer['id'],
+            ]);
+        }
 
         // Remove pricingOptions if it's an empty array (Amadeus rejects empty arrays)
         if (isset($flightOffer['pricingOptions']) && 
@@ -1246,6 +1368,83 @@ class PnrGenerationService
         }
 
         return $dates;
+    }
+
+    /**
+     * Extract search parameters from flight data for fallback search
+     */
+    private function extractSearchParamsFromFlightData(array $flightData, array $response): array
+    {
+        $params = [
+            'originLocationCode' => null,
+            'destinationLocationCode' => null,
+            'departureDate' => null,
+            'returnDate' => null,
+            'adults' => 1,
+        ];
+
+        // Extract from flight data itineraries
+        if (!empty($flightData['itineraries']) && is_array($flightData['itineraries'])) {
+            $firstItinerary = $flightData['itineraries'][0];
+            $segments = $firstItinerary['segments'] ?? [];
+            
+            if (!empty($segments)) {
+                $firstSegment = $segments[0];
+                $params['originLocationCode'] = $firstSegment['departure']['iataCode'] ?? null;
+                
+                $lastSegment = $segments[count($segments) - 1];
+                $params['destinationLocationCode'] = $lastSegment['arrival']['iataCode'] ?? null;
+                
+                if (!empty($firstSegment['departure']['at'])) {
+                    try {
+                        $date = new \DateTime($firstSegment['departure']['at']);
+                        $params['departureDate'] = $date->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Ignore
+                    }
+                }
+            }
+
+            // Check for return flight
+            if (!empty($flightData['itineraries'][1])) {
+                $returnItinerary = $flightData['itineraries'][1];
+                $returnSegments = $returnItinerary['segments'] ?? [];
+                
+                if (!empty($returnSegments) && !empty($returnSegments[0]['departure']['at'])) {
+                    try {
+                        $date = new \DateTime($returnSegments[0]['departure']['at']);
+                        $params['returnDate'] = $date->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Ignore
+                    }
+                }
+            }
+        }
+
+        // Fallback to form fields if not found in flight data
+        if (empty($params['originLocationCode']) || empty($params['destinationLocationCode']) || empty($params['departureDate'])) {
+            $formParams = $this->extractFlightParams($response);
+            
+            if (empty($params['originLocationCode']) && !empty($formParams['originLocationCode'])) {
+                $params['originLocationCode'] = $formParams['originLocationCode'];
+            }
+            if (empty($params['destinationLocationCode']) && !empty($formParams['destinationLocationCode'])) {
+                $params['destinationLocationCode'] = $formParams['destinationLocationCode'];
+            }
+            if (empty($params['departureDate']) && !empty($formParams['departureDate'])) {
+                $params['departureDate'] = $formParams['departureDate'];
+            }
+            if (empty($params['returnDate']) && !empty($formParams['returnDate'])) {
+                $params['returnDate'] = $formParams['returnDate'];
+            }
+        }
+
+        // Extract passenger count
+        if (!empty($flightData['travelerPricings']) && is_array($flightData['travelerPricings'])) {
+            $params['adults'] = count($flightData['travelerPricings']);
+        }
+
+        return array_filter($params, fn($value) => $value !== null);
     }
 }
 

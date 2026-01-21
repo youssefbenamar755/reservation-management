@@ -150,22 +150,20 @@
     }
 
     .airline-logo {
-      width: 48px;
-      height: 48px;
-      display: inline-block;
-      text-align: center;
-      line-height: 48px;
-      color: white;
-      font-size: 14px;
-      margin-bottom: 5px;
-      overflow: hidden;
-    }
+  width: 78px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 5px;
+}
 
-    .airline-logo img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
+.airline-logo img {
+  width: 100%;
+  height: auto;
+  max-height: 48px;
+  object-fit: contain;
+}
+
 
     .text-muted {
       color: #718096;
@@ -395,7 +393,7 @@
       <!-- Trip Header -->
       <div class="ticket-section-header">
         <div class="ticket-section-header-left">
-          <span><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z'/%3E%3C/svg%3E" alt="Flight" style="width: 15px; height: 15px; vertical-align: middle; margin-right: 10px;"> {{ $trip['title'] }}</span>
+          <span><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z'/%3E%3C/svg%3E" alt="Flight" style="width: 15px; height: 15px; vertical-align: middle; margin-right: 10px;rotate: 45deg;"> {{ $trip['title'] }}</span>
         </div>
         <div class="ticket-section-header-right">
           <span>Total Flight Duration: {{ $trip['total_duration'] ?? '-' }}</span>

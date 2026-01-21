@@ -33,6 +33,7 @@ const isGeneratingAmadeusCode = ref(false)
 const isGeneratingPnr = ref(false)
 const page = usePage()
 const lastProcessedFlash = ref<{ success?: string; error?: string }>({})
+const entryPdfs = ref<Array<{ passenger_name: string; url: string }>>([])
 
 watch(
   () => (page.props as any).flash?.success,
@@ -154,19 +155,24 @@ function generatePnr() {
       router.reload({ 
         only: ['entry'],
         onSuccess: (reloadedPage) => {
-          // After reload, check if entry has PDF path and open it
-          const entry = (reloadedPage.props as any).entry
-          if (entry?.pnr_pdf_path) {
-            // Construct PDF URL - Laravel's storage link
-            const pdfUrl = `/storage/${entry.pnr_pdf_path}`
-            // Open PDF in new tab
-            window.open(pdfUrl, '_blank')
-            toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
+          // Check for PDFs in flash data (new format with multiple PDFs)
+          const flash = (reloadedPage.props as any).flash
+          if (flash?.pdfs && Array.isArray(flash.pdfs) && flash.pdfs.length > 0) {
+            // Multiple PDFs - show success message with count
+            toast.success(`PNR generated successfully. ${flash.pdfs.length} PDF(s) generated.`)
+            // Store PDFs for display
+            entryPdfs.value = flash.pdfs
           } else {
-            // Check for PDF URL in flash data as fallback
-            const flash = (reloadedPage.props as any).flash
-            if (flash?.pdf_url) {
-              window.open(flash.pdf_url, '_blank')
+            // Fallback to single PDF (backward compatibility)
+            const entry = (reloadedPage.props as any).entry
+            if (entry?.pnr_pdf_path) {
+              // Construct PDF URL - Laravel's storage link
+              const pdfUrl = `/storage/${entry.pnr_pdf_path}`
+              // Open PDF in new tab
+              openUrl(pdfUrl)
+              toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
+            } else if (flash?.pdf_url) {
+              openUrl(flash.pdf_url)
               toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
             }
           }
@@ -187,7 +193,16 @@ function downloadPdf() {
     return
   }
 
-  window.location.href = `/submissions/entries/${props.entry.id}/download-pdf`
+  if (typeof window !== 'undefined') {
+    window.location.href = `/submissions/entries/${props.entry.id}/download-pdf`
+  }
+}
+
+// Open URL in new tab
+function openUrl(url: string) {
+  if (typeof window !== 'undefined') {
+    window.open(url, '_blank')
+  }
 }
 
 function isFieldEmpty(value: any): boolean {
@@ -916,15 +931,16 @@ const remainingFields = computed(() => {
 
   <AppLayout :breadcrumbs="breadcrumbs">
     <div
-      class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4"
+      class="flex h-full flex-1 flex-col gap-4 sm:gap-6 overflow-x-auto rounded-xl p-3 sm:p-4"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div class="flex items-center gap-4">
-          <Link :href="`/submissions/forms/${entry.website_id}/${entry.form_id}`">
-            <Button variant="outline" size="sm">
+          <Link :href="`/submissions/forms/${entry.website_id}/${entry.form_id}`" class="flex-1 sm:flex-none">
+            <Button variant="outline" size="sm" class="w-full sm:w-auto">
               <ArrowLeft class="mr-2 h-4 w-4" />
-              Back to Entries
+              <span class="hidden sm:inline">Back to Entries</span>
+              <span class="sm:hidden">Back</span>
             </Button>
           </Link>
         
@@ -934,6 +950,7 @@ const remainingFields = computed(() => {
           size="sm"
           :disabled="isDeleting"
           @click="deleteEntry"
+          class="w-full sm:w-auto"
         >
           <Trash2 v-if="!isDeleting" class="mr-2 h-4 w-4" />
           <span v-else class="mr-2 h-4 w-4 animate-spin">⏳</span>
@@ -942,30 +959,31 @@ const remainingFields = computed(() => {
       </div>
 
       <!-- Main Content & Sidebar Layout -->
-      <div class="grid gap-6 lg:grid-cols-3">
+      <div class="grid gap-6 grid-cols-1 lg:grid-cols-3">
         <!-- Left Column: Form Entry Data -->
-        <div class="lg:col-span-2 space-y-6">
+        <div class="lg:col-span-2 space-y-6 order-2 lg:order-1">
           <!-- Form Entry Data -->
           <Card>
             <CardHeader>
-              <div class="flex items-center justify-between">
-                <div>
-                  <CardTitle class="flex items-center gap-2">
-                    <Database class="h-5 w-5" />
-                    Form Entry #{{ entry.entry_id }}
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <CardTitle class="flex items-center gap-2 flex-wrap">
+                    <Database class="h-5 w-5 flex-shrink-0" />
+                    <span class="break-words">Form Entry #{{ entry.entry_id }}</span>
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription class="break-words">
                     Form ID: {{ entry.form_id }} • {{ entry.website.name }}
                   </CardDescription>
                 </div>
-                <div class="flex items-center gap-2">
-                  <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-foreground text-muted-foreground">
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-foreground text-muted-foreground whitespace-nowrap">
                     <input
                       type="checkbox"
                       v-model="showEmptyFields"
                       class="h-4 w-4 rounded border-input"
                     />
-                    <span>Show empty fields</span>
+                    <span class="hidden sm:inline">Show empty fields</span>
+                    <span class="sm:hidden">Show empty</span>
                   </label>
                 </div>
               </div>
@@ -975,11 +993,11 @@ const remainingFields = computed(() => {
                 <!-- Flight From and Flight To - Side by Side -->
                 <div v-if="flightFromField || flightToField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <!-- Flight From Field -->
-                  <div v-if="flightFromField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="flightFromField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ flightFromField.label }}
                           </p>
                         </div>
@@ -1047,11 +1065,11 @@ const remainingFields = computed(() => {
                   </div>
 
                   <!-- Flight To Field -->
-                  <div v-if="flightToField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="flightToField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ flightToField.label }}
                           </p>
                         </div>
@@ -1122,11 +1140,11 @@ const remainingFields = computed(() => {
                 <!-- Email and Phone - Side by Side -->
                 <div v-if="emailField || phoneField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <!-- Email Field -->
-                  <div v-if="emailField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="emailField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ emailField.label }}
                           </p>
                         </div>
@@ -1194,11 +1212,11 @@ const remainingFields = computed(() => {
                   </div>
 
                   <!-- Phone Field -->
-                  <div v-if="phoneField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="phoneField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ phoneField.label }}
                           </p>
                         </div>
@@ -1269,11 +1287,11 @@ const remainingFields = computed(() => {
                 <!-- Flight Departure and Flight Arrival - Side by Side -->
                 <div v-if="flightDepartureField || flightArrivalField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <!-- Flight Departure Field -->
-                  <div v-if="flightDepartureField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="flightDepartureField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ flightDepartureField.label }}
                           </p>
                         </div>
@@ -1341,11 +1359,11 @@ const remainingFields = computed(() => {
                   </div>
 
                   <!-- Flight Arrival Field -->
-                  <div v-if="flightArrivalField" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                  <div v-if="flightArrivalField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ flightArrivalField.label }}
                           </p>
                         </div>
@@ -1414,11 +1432,11 @@ const remainingFields = computed(() => {
                 </div>
 
                 <!-- Names Field -->
-                <div v-if="namesFieldDisplay" class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
+                <div v-if="namesFieldDisplay" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
                   <div class="space-y-3">
-                    <div class="flex items-start justify-between gap-4">
+                    <div class="flex items-start justify-between gap-2 sm:gap-4">
                       <div class="flex items-center gap-2 flex-1 min-w-0">
-                        <p class="text-sm font-semibold text-muted-foreground tracking-wide">
+                        <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                           {{ namesFieldDisplay.label }}
                         </p>
                       </div>
@@ -1500,11 +1518,11 @@ const remainingFields = computed(() => {
                   <div class="space-y-4">
                     <div>
                       <h4 class="text-sm font-semibold mb-1">Generate Dummy Ticket Code</h4>
-                      <p class="text-xs text-muted-foreground mb-4">
+                      <p class="text-xs text-muted-foreground mb-4 break-words">
                         Generate a full Amadeus-style dummy ticket command block for sellingplatformconnect
                       </p>
                       <div v-if="entry.amadeus_command_block" class="mb-4 space-y-3">
-                        <div class="relative rounded-lg border bg-muted/20 p-4">
+                        <div class="relative rounded-lg border bg-muted/20 p-4 overflow-x-auto">
                           <pre class="text-xs font-mono whitespace-pre-wrap break-words">{{ entry.amadeus_command_block }}</pre>
                         </div>
                         <div class="flex items-center gap-2">
@@ -1519,7 +1537,7 @@ const remainingFields = computed(() => {
                             {{ copiedField === 'amadeus_command_block' ? 'Copied!' : 'Copy All' }}
                           </Button>
                         </div>
-                        <span v-if="entry.amadeus_generated_at" class="text-xs text-muted-foreground block">
+                        <span v-if="entry.amadeus_generated_at" class="text-xs text-muted-foreground block break-words">
                           Generated {{ formatDate(entry.amadeus_generated_at) }}
                         </span>
                       </div>
@@ -1532,7 +1550,8 @@ const remainingFields = computed(() => {
                     >
                       <Loader2 v-if="isGeneratingAmadeusCode" class="mr-2 h-4 w-4 animate-spin" />
                       <Ticket v-else class="mr-2 h-4 w-4" />
-                      {{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Dummy Ticket Code' : 'Generate Dummy Ticket Code') }}
+                      <span class="hidden sm:inline">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Dummy Ticket Code' : 'Generate Dummy Ticket Code') }}</span>
+                      <span class="sm:hidden">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate' : 'Generate Code') }}</span>
                     </Button>
                   </div>
                 </div>
@@ -1544,31 +1563,31 @@ const remainingFields = computed(() => {
                     v-if="field.isFlight === true"
                     class="space-y-3"
                   >
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="flex items-center gap-2 flex-1 min-w-0">
-                        <p class="text-sm font-semibold text-muted-foreground tracking-wide">
-                          {{ field.label }}
-                        </p>
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
+                        <div class="flex items-center gap-2 flex-1 min-w-0">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
+                            {{ field.label }}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          class="h-8 w-8 p-0 flex-shrink-0"
+                          @click="copyToClipboard(field.value, field.key)"
+                          :title="copiedField === field.key ? 'Copied!' : 'Copy flight data'"
+                        >
+                          <CheckCircle2 v-if="copiedField === field.key" class="h-4 w-4 text-green-500" />
+                          <Copy v-else class="h-4 w-4" />
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        class="h-8 w-8 p-0 flex-shrink-0"
-                        @click="copyToClipboard(field.value, field.key)"
-                        :title="copiedField === field.key ? 'Copied!' : 'Copy flight data'"
-                      >
-                        <CheckCircle2 v-if="copiedField === field.key" class="h-4 w-4 text-green-500" />
-                        <Copy v-else class="h-4 w-4" />
-                      </Button>
-                    </div>
                     <FlightCard 
                       :flight-data="ensureParsedFlightData(field.value)" 
                     />
                     
                     <!-- Generate Amadeus Code Button -->
                     <div class="pt-4 border-t">
-                      <div class="flex items-center justify-between gap-4">
-                        <div class="flex-1">
+                      <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-4">
+                        <div class="flex-1 min-w-0">
                           <h4 class="text-sm font-semibold mb-1">Dummy Ticket Code</h4>
                           <p class="text-xs text-muted-foreground">
                             Generate a full Amadeus-style dummy ticket command block
@@ -1596,15 +1615,16 @@ const remainingFields = computed(() => {
                           :disabled="isGeneratingAmadeusCode || !hasFlightData"
                           @click="generateAmadeusCode"
                           :variant="entry.amadeus_command_block ? 'outline' : 'default'"
-                          class="flex-shrink-0"
+                          class="w-full sm:w-auto flex-shrink-0"
                         >
                           <Loader2 v-if="isGeneratingAmadeusCode" class="mr-2 h-4 w-4 animate-spin" />
                           <Ticket v-else class="mr-2 h-4 w-4" />
-                          {{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Code' : 'Generate Dummy Ticket Code') }}
+                          <span class="hidden sm:inline">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Code' : 'Generate Dummy Ticket Code') }}</span>
+                          <span class="sm:hidden">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate' : 'Generate Code') }}</span>
                         </Button>
                       </div>
                       <div v-if="!hasFlightData" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                        <AlertCircle class="h-3 w-3" />
+                        <AlertCircle class="h-3 w-3 flex-shrink-0" />
                         <span>Insufficient flight data to generate ticket</span>
                       </div>
                     </div>
@@ -1613,12 +1633,12 @@ const remainingFields = computed(() => {
                   <!-- Other field types - Display with field label wrapper -->
                   <div
                     v-else
-                    class="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
+                    class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
                   >
                     <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start justify-between gap-2 sm:gap-4">
                         <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground  tracking-wide">
+                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
                             {{ field.label }}
                           </p>
                         </div>
@@ -1701,18 +1721,19 @@ const remainingFields = computed(() => {
           <!-- Raw Payload -->
           <Card>
             <CardHeader>
-              <div class="flex items-center justify-between">
-                <div>
-                  <CardTitle class="flex items-center gap-2">
-                    <Code class="h-5 w-5" />
-                    Raw Payload
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <CardTitle class="flex items-center gap-2 flex-wrap">
+                    <Code class="h-5 w-5 flex-shrink-0" />
+                    <span class="break-words">Raw Payload</span>
                   </CardTitle>
-                  <CardDescription>Complete entry data from Fluent Forms</CardDescription>
+                  <CardDescription class="break-words">Complete entry data from Fluent Forms</CardDescription>
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
                   @click="showRawPayload = !showRawPayload"
+                  class="w-full sm:w-auto"
                 >
                   <Eye v-if="!showRawPayload" class="mr-2 h-4 w-4" />
                   <EyeOff v-else class="mr-2 h-4 w-4" />
@@ -1735,7 +1756,7 @@ const remainingFields = computed(() => {
         </div>
 
         <!-- Right Column: Submission Info -->
-        <div class="lg:col-span-1 space-y-6">
+        <div class="lg:col-span-1 space-y-6 order-1 lg:order-2">
           <!-- Submission Information -->
           <Card>
             <CardHeader>
@@ -1747,41 +1768,41 @@ const remainingFields = computed(() => {
             </CardHeader>
             <CardContent class="space-y-3">
               <!-- Submission ID -->
-              <div class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Hash class="h-3.5 w-3.5" />
                   Submission ID
                 </div>
-                <p class="text-sm font-bold text-foreground text-right">
+                <p class="text-sm font-bold text-foreground break-words sm:text-right w-full sm:w-auto">
                   #{{ submissionMeta.serialNumber || entry.entry_id }}
                 </p>
               </div>
 
               <!-- Form ID -->
-              <div class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <FileText class="h-3.5 w-3.5" />
                   Form ID
                 </div>
-                <p class="text-sm font-semibold text-foreground text-right">
+                <p class="text-sm font-semibold text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ entry.form_id }}
                 </p>
               </div>
 
               <!-- Website -->
-              <div class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Globe class="h-3.5 w-3.5" />
                   Website
                 </div>
-                <p class="text-sm font-medium text-foreground text-right">
+                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ entry.website.name }}
                 </p>
               </div>
 
               <!-- User IP -->
-              <div v-if="submissionMeta.userIP" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.userIP" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Hash class="h-3.5 w-3.5" />
                   User IP
                 </div>
@@ -1789,15 +1810,15 @@ const remainingFields = computed(() => {
                   :href="`https://whois.domaintools.com/${submissionMeta.userIP}`"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="text-sm font-medium text-primary hover:underline text-right break-words"
+                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right w-full sm:w-auto"
                 >
                   {{ submissionMeta.userIP }}
                 </a>
               </div>
 
               <!-- Source URL -->
-              <div v-if="submissionMeta.sourceURL" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.sourceURL" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Globe class="h-3.5 w-3.5" />
                   Source URL
                 </div>
@@ -1805,92 +1826,92 @@ const remainingFields = computed(() => {
                   :href="submissionMeta.sourceURL"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="text-sm font-medium text-primary hover:underline text-right break-words max-w-[60%]"
+                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right sm:max-w-[60%] w-full sm:w-auto"
                 >
                   {{ submissionMeta.sourceURL }}
                 </a>
               </div>
 
               <!-- Browser -->
-              <div v-if="submissionMeta.browser" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.browser" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Globe class="h-3.5 w-3.5" />
                   Browser
                 </div>
-                <p class="text-sm font-medium text-foreground text-right">
+                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ submissionMeta.browser }}
                 </p>
               </div>
 
               <!-- Device / OS -->
-              <div v-if="submissionMeta.device" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.device" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Hash class="h-3.5 w-3.5" />
                   Device / OS
                 </div>
-                <p class="text-sm font-medium text-foreground text-right">
+                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ submissionMeta.device }}
                 </p>
               </div>
 
               <!-- User -->
-              <div v-if="submissionMeta.user" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.user" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Hash class="h-3.5 w-3.5" />
                   User
                 </div>
-                <p class="text-sm font-medium text-foreground text-right">
+                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ submissionMeta.user }}
                 </p>
               </div>
 
               <!-- Status -->
-              <div v-if="submissionMeta.status" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="submissionMeta.status" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Hash class="h-3.5 w-3.5" />
                   Status
                 </div>
-                <Badge variant="outline" class="font-semibold text-xs">
+                <Badge variant="outline" class="font-semibold text-xs w-full sm:w-auto justify-center sm:justify-start">
                   {{ submissionMeta.status }}
                 </Badge>
               </div>
 
               <!-- Email -->
-              <div v-if="entry.email" class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div v-if="entry.email" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Mail class="h-3.5 w-3.5" />
                   E-mail
                 </div>
                 <a
                   :href="`mailto:${entry.email}`"
-                  class="text-sm font-medium text-primary hover:underline text-right break-words max-w-[60%]"
+                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right sm:max-w-[60%] w-full sm:w-auto"
                 >
                   {{ entry.email }}
                 </a>
               </div>
 
               <!-- Submission Date -->
-              <div class="flex items-center justify-between gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
+                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                   <Calendar class="h-3.5 w-3.5" />
                   Submitted On
                 </div>
-                <p class="text-sm font-medium text-foreground text-right">
+                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
                   {{ formatDate(entry.created_at_wp) }}
                 </p>
               </div>
 
               <!-- PNR Section -->
               <div class="pt-3 space-y-3 border-t">
-                <div class="flex items-center justify-between gap-4">
-                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4">
+                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                     <Ticket class="h-3.5 w-3.5" />
                     PNR
                   </div>
-                  <Badge v-if="!entry.pnr" variant="outline" class="text-xs">
+                  <Badge v-if="!entry.pnr" variant="outline" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
                     Not Generated
                   </Badge>
-                  <Badge v-else variant="default" class="text-xs">
+                  <Badge v-else variant="default" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
                     {{ entry.pnr }}
                   </Badge>
                 </div>
@@ -1902,8 +1923,23 @@ const remainingFields = computed(() => {
                       Source: {{ entry.pnr_source === 'amadeus_direct' ? 'Direct' : 'Search' }}
                     </div>
                   </div>
+                  <!-- Multiple PDFs (new format) -->
+                  <div v-if="entryPdfs.length > 0" class="space-y-2 w-full">
+                    <div v-for="(pdf, index) in entryPdfs" :key="index" class="w-full">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="() => openUrl(pdf.url)"
+                        class="w-full"
+                      >
+                        <Download class="mr-2 h-3 w-3" />
+                        Download {{ pdf.passenger_name || `PDF ${index + 1}` }}
+                      </Button>
+                    </div>
+                  </div>
+                  <!-- Single PDF (backward compatibility) -->
                   <Button
-                    v-if="entry.pnr_pdf_path"
+                    v-else-if="entry.pnr_pdf_path"
                     variant="outline"
                     size="sm"
                     @click="downloadPdf"
@@ -1935,12 +1971,12 @@ const remainingFields = computed(() => {
 
               <!-- Amadeus Code Section -->
               <div class="pt-3 space-y-3 border-t">
-                <div class="flex items-center justify-between gap-4">
-                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4">
+                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
                     <Ticket class="h-3.5 w-3.5" />
                     Dummy Ticket Code
                   </div>
-                  <Badge v-if="!entry.amadeus_command_block" variant="outline" class="text-xs">
+                  <Badge v-if="!entry.amadeus_command_block" variant="outline" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
                     Not Generated
                   </Badge>
                 </div>
