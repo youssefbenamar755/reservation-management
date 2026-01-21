@@ -23,8 +23,13 @@ class WcOrderController extends Controller
             ->when($request->status, fn ($q) =>
                 $q->where('status', $request->status)
             )
-            ->when($request->email, fn ($q) =>
-                $q->where('customer_email', 'like', "%{$request->email}%")
+            ->when($request->search, fn ($q) =>
+                $q->where(function ($query) use ($request) {
+                    $search = $request->search;
+                    $query->where('wp_order_id', 'like', "%{$search}%")
+                        ->orWhere('customer_name', 'like', "%{$search}%")
+                        ->orWhere('customer_email', 'like', "%{$search}%");
+                })
             )
             ->latest('created_at_wp')
             ->paginate(15)
@@ -33,7 +38,7 @@ class WcOrderController extends Controller
         return Inertia::render('Orders/Index', [
             'orders' => $orders,
             'websites' => Website::select('id', 'name')->get(),
-            'filters' => $request->only(['website_id', 'status', 'email']),
+            'filters' => $request->only(['website_id', 'status', 'search']),
         ]);
     }
 

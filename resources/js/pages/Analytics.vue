@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
-import { Head, router } from '@inertiajs/vue3'
+import { Head, router, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import {
   Card,
@@ -12,6 +12,13 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { Spinner } from '@/components/ui/spinner'
 import {
   DollarSign,
   ShoppingCart,
@@ -27,6 +34,8 @@ import {
   Clock,
   Award,
   Plane,
+  RefreshCw,
+  Info,
 } from 'lucide-vue-next'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import OrdersChart from '@/components/charts/OrdersChart.vue'
@@ -89,6 +98,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const page = usePage()
 
 const breadcrumbs: BreadcrumbItem[] = [
   {
@@ -107,7 +117,14 @@ const selectedWebsiteIds = ref<number[]>(
 )
 const paymentStatus = ref(props.filters.payment_status || '')
 
+// Loading state
+const isLoading = ref(false)
+
+// Last refresh timestamp
+const lastRefresh = ref<Date>(new Date())
+
 function applyFilters() {
+  isLoading.value = true
   const params: Record<string, any> = {
     start_date: startDate.value,
     end_date: endDate.value,
@@ -124,7 +141,47 @@ function applyFilters() {
   router.get('/analytics', params, {
     preserveState: false,
     preserveScroll: false,
+    onFinish: () => {
+      isLoading.value = false
+      lastRefresh.value = new Date()
+    },
   })
+}
+
+function refreshData() {
+  applyFilters()
+}
+
+function setDatePreset(preset: '7d' | '30d' | '90d' | 'thisMonth' | 'lastMonth' | 'thisYear') {
+  const today = new Date()
+  const end = new Date(today)
+  let start = new Date(today)
+
+  switch (preset) {
+    case '7d':
+      start.setDate(today.getDate() - 7)
+      break
+    case '30d':
+      start.setDate(today.getDate() - 30)
+      break
+    case '90d':
+      start.setDate(today.getDate() - 90)
+      break
+    case 'thisMonth':
+      start = new Date(today.getFullYear(), today.getMonth(), 1)
+      break
+    case 'lastMonth':
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      end.setDate(0) // Last day of previous month
+      break
+    case 'thisYear':
+      start = new Date(today.getFullYear(), 0, 1)
+      break
+  }
+
+  startDate.value = start.toISOString().split('T')[0]
+  endDate.value = end.toISOString().split('T')[0]
+  applyFilters()
 }
 
 function resetFilters() {
@@ -163,6 +220,19 @@ function formatHour(hour: number): string {
   const ampm = hour < 12 ? 'AM' : 'PM'
   return `${h}:00 ${ampm}`
 }
+
+// Format last refresh time
+function formatLastRefresh(date: Date): string {
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+}
 </script>
 
 <template>
@@ -180,10 +250,49 @@ function formatHour(hour: number): string {
               <CardTitle class="text-base sm:text-lg">Filters</CardTitle>
               <CardDescription class="text-xs sm:text-sm">Filter analytics data by date, website, and order status</CardDescription>
             </div>
-            <Filter class="h-5 w-5 text-muted-foreground hidden sm:block" />
+            <div class="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                @click="refreshData"
+                :disabled="isLoading"
+                class="text-xs sm:text-sm"
+              >
+                <RefreshCw :class="['h-3 w-3 sm:h-4 sm:w-4 mr-1', isLoading && 'animate-spin']" />
+                Refresh
+              </Button>
+              <Filter class="h-5 w-5 text-muted-foreground hidden sm:block" />
+            </div>
+          </div>
+          <div v-if="lastRefresh" class="mt-2 text-xs text-muted-foreground">
+            Last updated: {{ formatLastRefresh(lastRefresh) }}
           </div>
         </CardHeader>
         <CardContent>
+          <!-- Quick Date Presets -->
+          <div class="mb-4 space-y-2">
+            <Label class="text-xs sm:text-sm">Quick Date Presets</Label>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                v-for="preset in [
+                  { key: '7d', label: 'Last 7 Days' },
+                  { key: '30d', label: 'Last 30 Days' },
+                  { key: '90d', label: 'Last 90 Days' },
+                  { key: 'thisMonth', label: 'This Month' },
+                  { key: 'lastMonth', label: 'Last Month' },
+                  { key: 'thisYear', label: 'This Year' },
+                ]"
+                :key="preset.key"
+                variant="outline"
+                size="sm"
+                @click="setDatePreset(preset.key as any)"
+                class="text-xs sm:text-sm"
+              >
+                {{ preset.label }}
+              </Button>
+            </div>
+          </div>
+
           <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <!-- Date Range -->
             <div class="space-y-2">
@@ -259,11 +368,34 @@ function formatHour(hour: number): string {
         </CardContent>
       </Card>
 
+      <!-- Loading Overlay -->
+      <div
+        v-if="isLoading"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+      >
+        <div class="flex flex-col items-center gap-3">
+          <Spinner class="h-8 w-8" />
+          <p class="text-sm text-muted-foreground">Loading analytics...</p>
+        </div>
+      </div>
+
       <!-- Statistics Cards -->
       <div class="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-xs sm:text-sm font-medium">Total Revenue</CardTitle>
+            <div class="flex items-center gap-1">
+              <CardTitle class="text-xs sm:text-sm font-medium">Total Revenue</CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Info class="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Total revenue from completed orders only</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <DollarSign class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
@@ -354,7 +486,19 @@ function formatHour(hour: number): string {
       <div class="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-xs sm:text-sm font-medium">Average Order Value</CardTitle>
+            <div class="flex items-center gap-1">
+              <CardTitle class="text-xs sm:text-sm font-medium">Average Order Value</CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Info class="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Average revenue per completed order (Total Revenue ÷ Completed Orders)</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <BarChart3 class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
@@ -367,7 +511,19 @@ function formatHour(hour: number): string {
 
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-xs sm:text-sm font-medium">Net Revenue</CardTitle>
+            <div class="flex items-center gap-1">
+              <CardTitle class="text-xs sm:text-sm font-medium">Net Revenue</CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Info class="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Total revenue minus PayPal transaction fees</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <DollarSign class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>

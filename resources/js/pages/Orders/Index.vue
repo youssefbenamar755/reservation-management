@@ -14,7 +14,7 @@ const props = defineProps<{
   filters: {
     website_id?: string
     status?: string
-    email?: string
+    search?: string
   }
 }>()
 
@@ -155,9 +155,9 @@ function formatDate(dateString: string | null) {
         <input
           type="text"
           class="rounded-md border bg-background px-3 py-2 text-sm"
-          placeholder="Customer email"
-          :value="props.filters.email"
-          @input="updateFilter('email', ($event.target as HTMLInputElement).value)"
+          placeholder="Search by Order ID, Customer Name, or Email"
+          :value="props.filters.search"
+          @input="updateFilter('search', ($event.target as HTMLInputElement).value)"
         />
 
         <Button
