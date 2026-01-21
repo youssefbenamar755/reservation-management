@@ -26,6 +26,7 @@ import {
   Target,
   Clock,
   Award,
+  Plane,
 } from 'lucide-vue-next'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import OrdersChart from '@/components/charts/OrdersChart.vue'
@@ -75,6 +76,9 @@ interface Props {
     order_to_paid_rate: number
     submission_to_paid_rate: number
   }
+  topDepartureAirports?: Array<{ airport: string; count: number }>
+  topArrivalAirports?: Array<{ airport: string; count: number }>
+  topRoutes?: Array<{ route: string; count: number }>
   websites: Array<{ id: number; name: string }>
   filters: {
     start_date: string
@@ -166,17 +170,17 @@ function formatHour(hour: number): string {
 
   <AppLayout :breadcrumbs="breadcrumbs">
     <div
-      class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4"
+      class="flex h-full flex-1 flex-col gap-4 sm:gap-6 overflow-x-auto rounded-xl p-3 sm:p-4 md:p-6"
     >
       <!-- Filters -->
       <Card>
         <CardHeader>
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <CardTitle>Filters</CardTitle>
-              <CardDescription>Filter analytics data by date, website, and order status</CardDescription>
+              <CardTitle class="text-base sm:text-lg">Filters</CardTitle>
+              <CardDescription class="text-xs sm:text-sm">Filter analytics data by date, website, and order status</CardDescription>
             </div>
-            <Filter class="h-5 w-5 text-muted-foreground" />
+            <Filter class="h-5 w-5 text-muted-foreground hidden sm:block" />
           </div>
         </CardHeader>
         <CardContent>
@@ -227,21 +231,22 @@ function formatHour(hour: number): string {
             </div>
 
             <!-- Actions -->
-            <div class="flex items-end gap-2">
-              <Button @click="applyFilters" class="flex-1">Apply Filters</Button>
-              <Button variant="outline" @click="resetFilters">Reset</Button>
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
+              <Button @click="applyFilters" class="flex-1 w-full sm:w-auto">Apply Filters</Button>
+              <Button variant="outline" @click="resetFilters" class="w-full sm:w-auto">Reset</Button>
             </div>
           </div>
 
           <!-- Website Multi-Select -->
           <div class="mt-4 space-y-2">
-            <Label>Websites (Select multiple)</Label>
+            <Label class="text-sm">Websites (Select multiple)</Label>
             <div class="flex flex-wrap gap-2">
               <Button
                 v-for="website in websites"
                 :key="website.id"
                 :variant="selectedWebsiteIds.includes(website.id) ? 'default' : 'outline'"
                 size="sm"
+                class="text-xs sm:text-sm"
                 @click="toggleWebsite(website.id)"
               >
                 {{ website.name }}
@@ -255,15 +260,15 @@ function formatHour(hour: number): string {
       </Card>
 
       <!-- Statistics Cards -->
-      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div class="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Total Revenue</CardTitle>
+            <DollarSign class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ formatCurrency(stats.total_revenue) }}</div>
-            <p class="text-xs text-muted-foreground">Completed orders only</p>
+            <div class="text-xl sm:text-2xl font-bold break-words">{{ formatCurrency(stats.total_revenue) }}</div>
+            <p class="text-xs text-muted-foreground mt-1">Completed orders only</p>
             <div
               v-if="stats.revenue_growth_percent !== undefined"
               class="mt-2 flex items-center gap-1 text-xs"
@@ -291,12 +296,12 @@ function formatHour(hour: number): string {
 
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Total Orders</CardTitle>
-            <ShoppingCart class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Total Orders</CardTitle>
+            <ShoppingCart class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ stats.total_orders.toLocaleString() }}</div>
-            <p class="text-xs text-muted-foreground">All orders in date range</p>
+            <div class="text-xl sm:text-2xl font-bold">{{ stats.total_orders.toLocaleString() }}</div>
+            <p class="text-xs text-muted-foreground mt-1">All orders in date range</p>
             <div
               v-if="stats.orders_growth_percent !== undefined"
               class="mt-2 flex items-center gap-1 text-xs"
@@ -324,52 +329,52 @@ function formatHour(hour: number): string {
 
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Completed Orders</CardTitle>
-            <CheckCircle2 class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Completed Orders</CardTitle>
+            <CheckCircle2 class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ stats.paid_orders.toLocaleString() }}</div>
-            <p class="text-xs text-muted-foreground">Orders with completed status</p>
+            <div class="text-xl sm:text-2xl font-bold">{{ stats.paid_orders.toLocaleString() }}</div>
+            <p class="text-xs text-muted-foreground mt-1">Orders with completed status</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">PayPal Fees</CardTitle>
-            <CreditCard class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">PayPal Fees</CardTitle>
+            <CreditCard class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ formatCurrency(stats.paypal_fees) }}</div>
-            <p class="text-xs text-muted-foreground">Total PayPal transaction fees</p>
+            <div class="text-xl sm:text-2xl font-bold break-words">{{ formatCurrency(stats.paypal_fees) }}</div>
+            <p class="text-xs text-muted-foreground mt-1">Total PayPal transaction fees</p>
           </CardContent>
         </Card>
       </div>
 
       <!-- Additional KPI Cards: AOV and Net Revenue -->
-      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div class="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Average Order Value</CardTitle>
-            <BarChart3 class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Average Order Value</CardTitle>
+            <BarChart3 class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">
+            <div class="text-xl sm:text-2xl font-bold break-words">
               {{ stats.average_order_value ? formatCurrency(stats.average_order_value) : '$0.00' }}
             </div>
-            <p class="text-xs text-muted-foreground">Revenue per completed order</p>
+            <p class="text-xs text-muted-foreground mt-1">Revenue per completed order</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Net Revenue</CardTitle>
-            <DollarSign class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Net Revenue</CardTitle>
+            <DollarSign class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">
+            <div class="text-xl sm:text-2xl font-bold break-words">
               {{ stats.net_revenue ? formatCurrency(stats.net_revenue) : '$0.00' }}
             </div>
-            <p class="text-xs text-muted-foreground">
+            <p class="text-xs text-muted-foreground mt-1">
               After PayPal fees
               <span v-if="stats.fee_percentage !== undefined">
                 ({{ stats.fee_percentage.toFixed(2) }}% fees)
@@ -381,12 +386,12 @@ function formatHour(hour: number): string {
         <!-- Top Performing Country Card -->
         <Card v-if="topCountry">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Top Country</CardTitle>
-            <Award class="h-4 w-4 text-muted-foreground" />
+            <CardTitle class="text-xs sm:text-sm font-medium">Top Country</CardTitle>
+            <Award class="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ topCountry.country }}</div>
-            <p class="text-xs text-muted-foreground">
+            <div class="text-xl sm:text-2xl font-bold">{{ topCountry.country }}</div>
+            <p class="text-xs text-muted-foreground mt-1">
               {{ formatCurrency(topCountry.revenue) }} ({{ topCountry.percentage.toFixed(1) }}% of total)
             </p>
           </CardContent>
@@ -396,8 +401,8 @@ function formatHour(hour: number): string {
       <!-- Revenue Over Time Chart -->
       <Card>
         <CardHeader>
-          <CardTitle>Revenue Over Time</CardTitle>
-          <CardDescription>Daily revenue trends</CardDescription>
+          <CardTitle class="text-base sm:text-lg">Revenue Over Time</CardTitle>
+          <CardDescription class="text-xs sm:text-sm">Daily revenue trends</CardDescription>
         </CardHeader>
         <CardContent>
           <RevenueChart
@@ -406,7 +411,7 @@ function formatHour(hour: number): string {
           />
           <div
             v-else
-            class="flex h-[300px] items-center justify-center text-muted-foreground"
+            class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
           >
             No revenue data available
           </div>
@@ -416,8 +421,8 @@ function formatHour(hour: number): string {
       <!-- Orders Over Time Chart -->
       <Card>
         <CardHeader>
-          <CardTitle>Orders Over Time</CardTitle>
-          <CardDescription>Daily order trends</CardDescription>
+          <CardTitle class="text-base sm:text-lg">Orders Over Time</CardTitle>
+          <CardDescription class="text-xs sm:text-sm">Daily order trends</CardDescription>
         </CardHeader>
         <CardContent>
           <OrdersChart
@@ -426,7 +431,7 @@ function formatHour(hour: number): string {
           />
           <div
             v-else
-            class="flex h-[300px] items-center justify-center text-muted-foreground"
+            class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
           >
             No order data available
           </div>
@@ -434,11 +439,11 @@ function formatHour(hour: number): string {
       </Card>
 
       <!-- Revenue by Website & Orders by Country -->
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Revenue by Website</CardTitle>
-            <CardDescription>Distribution of revenue across websites</CardDescription>
+            <CardTitle class="text-base sm:text-lg">Revenue by Website</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Distribution of revenue across websites</CardDescription>
           </CardHeader>
           <CardContent>
             <PieChart
@@ -449,7 +454,7 @@ function formatHour(hour: number): string {
             />
             <div
               v-else
-              class="flex h-[300px] items-center justify-center text-muted-foreground"
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
             >
               No revenue data available
             </div>
@@ -458,8 +463,8 @@ function formatHour(hour: number): string {
 
         <Card>
           <CardHeader>
-            <CardTitle>Orders by Country</CardTitle>
-            <CardDescription>Top 20 countries by order count</CardDescription>
+            <CardTitle class="text-base sm:text-lg">Orders by Country</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Top 20 countries by order count</CardDescription>
           </CardHeader>
           <CardContent>
             <BarChart
@@ -472,7 +477,7 @@ function formatHour(hour: number): string {
             />
             <div
               v-else
-              class="flex h-[300px] items-center justify-center text-muted-foreground"
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
             >
               No country data available
             </div>
@@ -481,11 +486,11 @@ function formatHour(hour: number): string {
       </div>
 
       <!-- Orders by Hour & Orders by Day of Week -->
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Orders by Hour of Day</CardTitle>
-            <CardDescription>Order distribution throughout the day</CardDescription>
+            <CardTitle class="text-base sm:text-lg">Orders by Hour of Day</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Order distribution throughout the day</CardDescription>
           </CardHeader>
           <CardContent>
             <BarChart
@@ -498,7 +503,7 @@ function formatHour(hour: number): string {
             />
             <div
               v-else
-              class="flex h-[300px] items-center justify-center text-muted-foreground"
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
             >
               No hourly data available
             </div>
@@ -507,8 +512,8 @@ function formatHour(hour: number): string {
 
         <Card>
           <CardHeader>
-            <CardTitle>Orders by Day of Week</CardTitle>
-            <CardDescription>Order distribution by weekday</CardDescription>
+            <CardTitle class="text-base sm:text-lg">Orders by Day of Week</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Order distribution by weekday</CardDescription>
           </CardHeader>
           <CardContent>
             <BarChart
@@ -521,7 +526,7 @@ function formatHour(hour: number): string {
             />
             <div
               v-else
-              class="flex h-[300px] items-center justify-center text-muted-foreground"
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
             >
               No day-of-week data available
             </div>
@@ -533,13 +538,13 @@ function formatHour(hour: number): string {
       <Card v-if="peakOrderTime && peakOrderTime.hour && peakOrderTime.day">
         <CardHeader>
           <div class="flex items-center gap-2">
-            <Clock class="h-5 w-5 text-muted-foreground" />
-            <CardTitle>Peak Order Time Insight</CardTitle>
+            <Clock class="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0" />
+            <CardTitle class="text-base sm:text-lg">Peak Order Time Insight</CardTitle>
           </div>
-          <CardDescription>Optimal times for marketing campaigns</CardDescription>
+          <CardDescription class="text-xs sm:text-sm">Optimal times for marketing campaigns</CardDescription>
         </CardHeader>
         <CardContent>
-          <p class="text-lg">
+          <p class="text-base sm:text-lg">
             Most orders occur at
             <span class="font-semibold">{{ peakOrderTime.hour }}</span>
             on
@@ -551,18 +556,18 @@ function formatHour(hour: number): string {
       <!-- Website Performance Ranking -->
       <Card v-if="websitePerformance && websitePerformance.length > 0">
         <CardHeader>
-          <CardTitle>Website Performance Ranking</CardTitle>
-          <CardDescription>Sorted by revenue with AOV and growth metrics</CardDescription>
+          <CardTitle class="text-base sm:text-lg">Website Performance Ranking</CardTitle>
+          <CardDescription class="text-xs sm:text-sm">Sorted by revenue with AOV and growth metrics</CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+          <div class="overflow-x-auto -mx-3 sm:mx-0">
+            <table class="w-full text-xs sm:text-sm min-w-[600px]">
               <thead>
                 <tr class="border-b">
                   <th class="text-left p-2 font-medium">Website</th>
                   <th class="text-right p-2 font-medium">Revenue</th>
-                  <th class="text-right p-2 font-medium">Orders</th>
-                  <th class="text-right p-2 font-medium">AOV</th>
+                  <th class="text-right p-2 font-medium hidden sm:table-cell">Orders</th>
+                  <th class="text-right p-2 font-medium hidden md:table-cell">AOV</th>
                   <th class="text-right p-2 font-medium">Growth %</th>
                 </tr>
               </thead>
@@ -575,20 +580,20 @@ function formatHour(hour: number): string {
                   <td class="p-2">
                     <div class="flex items-center gap-2">
                       <span
-                        class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium"
+                        class="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium flex-shrink-0"
                       >
                         {{ index + 1 }}
                       </span>
-                      <span>{{ website.name }}</span>
+                      <span class="truncate max-w-[120px] sm:max-w-none">{{ website.name }}</span>
                     </div>
                   </td>
-                  <td class="p-2 text-right font-medium">{{ formatCurrency(website.revenue) }}</td>
-                  <td class="p-2 text-right">{{ website.orders.toLocaleString() }}</td>
-                  <td class="p-2 text-right">{{ formatCurrency(website.aov) }}</td>
+                  <td class="p-2 text-right font-medium whitespace-nowrap">{{ formatCurrency(website.revenue) }}</td>
+                  <td class="p-2 text-right hidden sm:table-cell">{{ website.orders.toLocaleString() }}</td>
+                  <td class="p-2 text-right hidden md:table-cell whitespace-nowrap">{{ formatCurrency(website.aov) }}</td>
                   <td class="p-2 text-right">
                     <span
                       :class="[
-                        'font-medium',
+                        'font-medium whitespace-nowrap',
                         website.growth_percent >= 0 ? 'text-green-600' : 'text-red-600',
                       ]"
                     >
@@ -606,10 +611,10 @@ function formatHour(hour: number): string {
       <Card v-if="conversionFunnel">
         <CardHeader>
           <div class="flex items-center gap-2">
-            <Target class="h-5 w-5 text-muted-foreground" />
-            <CardTitle>Conversion Funnel</CardTitle>
+            <Target class="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0" />
+            <CardTitle class="text-base sm:text-lg">Conversion Funnel</CardTitle>
           </div>
-          <CardDescription>Fluent Forms submissions → Orders → Paid orders</CardDescription>
+          <CardDescription class="text-xs sm:text-sm">Fluent Forms submissions → Orders → Paid orders</CardDescription>
         </CardHeader>
         <CardContent>
           <div class="space-y-6">
@@ -617,9 +622,9 @@ function formatHour(hour: number): string {
             <div class="space-y-4">
               <!-- Form Submissions -->
               <div>
-                <div class="flex items-center justify-between mb-2">
-                  <span class="font-medium">Form Submissions</span>
-                  <span class="text-sm text-muted-foreground">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 mb-2">
+                  <span class="font-medium text-sm sm:text-base">Form Submissions</span>
+                  <span class="text-xs sm:text-sm text-muted-foreground">
                     {{ conversionFunnel.form_submissions.toLocaleString() }}
                   </span>
                 </div>
@@ -630,11 +635,11 @@ function formatHour(hour: number): string {
 
               <!-- Orders Created -->
               <div>
-                <div class="flex items-center justify-between mb-2">
-                  <span class="font-medium">Orders Created</span>
-                  <span class="text-sm text-muted-foreground">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 mb-2">
+                  <span class="font-medium text-sm sm:text-base">Orders Created</span>
+                  <span class="text-xs sm:text-sm text-muted-foreground">
                     {{ conversionFunnel.orders_created.toLocaleString() }}
-                    <span class="ml-2 font-medium text-orange-600">
+                    <span class="ml-1 sm:ml-2 font-medium text-orange-600">
                       ({{ conversionFunnel.submission_to_order_rate.toFixed(1) }}%)
                     </span>
                   </span>
@@ -649,11 +654,11 @@ function formatHour(hour: number): string {
 
               <!-- Paid Orders -->
               <div>
-                <div class="flex items-center justify-between mb-2">
-                  <span class="font-medium">Paid Orders</span>
-                  <span class="text-sm text-muted-foreground">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 mb-2">
+                  <span class="font-medium text-sm sm:text-base">Paid Orders</span>
+                  <span class="text-xs sm:text-sm text-muted-foreground">
                     {{ conversionFunnel.paid_orders.toLocaleString() }}
-                    <span class="ml-2 font-medium text-green-600">
+                    <span class="ml-1 sm:ml-2 font-medium text-green-600">
                       ({{ conversionFunnel.submission_to_paid_rate.toFixed(1) }}%)
                     </span>
                   </span>
@@ -668,26 +673,132 @@ function formatHour(hour: number): string {
             </div>
 
             <!-- Conversion Rates Summary -->
-            <div class="grid gap-4 md:grid-cols-3 pt-4 border-t">
+            <div class="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-3 pt-4 border-t">
               <div class="text-center">
-                <div class="text-2xl font-bold text-orange-600">
+                <div class="text-xl sm:text-2xl font-bold text-orange-600">
                   {{ conversionFunnel.submission_to_order_rate.toFixed(1) }}%
                 </div>
-                <div class="text-xs text-muted-foreground">Submissions → Orders</div>
+                <div class="text-xs text-muted-foreground mt-1">Submissions → Orders</div>
               </div>
               <div class="text-center">
-                <div class="text-2xl font-bold text-green-600">
+                <div class="text-xl sm:text-2xl font-bold text-green-600">
                   {{ conversionFunnel.order_to_paid_rate.toFixed(1) }}%
                 </div>
-                <div class="text-xs text-muted-foreground">Orders → Paid</div>
+                <div class="text-xs text-muted-foreground mt-1">Orders → Paid</div>
               </div>
               <div class="text-center">
-                <div class="text-2xl font-bold text-blue-600">
+                <div class="text-xl sm:text-2xl font-bold text-blue-600">
                   {{ conversionFunnel.submission_to_paid_rate.toFixed(1) }}%
                 </div>
-                <div class="text-xs text-muted-foreground">Overall Conversion</div>
+                <div class="text-xs text-muted-foreground mt-1">Overall Conversion</div>
               </div>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- Flight Route Analytics -->
+      <div class="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
+        <!-- Top Departure Airports -->
+        <Card>
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Plane class="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0" />
+              <CardTitle class="text-base sm:text-lg">Top Departure Airports</CardTitle>
+            </div>
+            <CardDescription class="text-xs sm:text-sm">Most requested departure airports</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BarChart
+              v-if="topDepartureAirports && topDepartureAirports.length > 0"
+              :data="topDepartureAirports"
+              label-key="airport"
+              value-key="count"
+              label="Requests"
+              color="rgb(59, 130, 246)"
+            />
+            <div
+              v-else
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
+            >
+              No departure airport data available
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Top Arrival Airports -->
+        <Card>
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Plane class="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0" />
+              <CardTitle class="text-base sm:text-lg">Top Arrival Airports</CardTitle>
+            </div>
+            <CardDescription class="text-xs sm:text-sm">Most requested arrival airports</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BarChart
+              v-if="topArrivalAirports && topArrivalAirports.length > 0"
+              :data="topArrivalAirports"
+              label-key="airport"
+              value-key="count"
+              label="Requests"
+              color="rgb(34, 197, 94)"
+            />
+            <div
+              v-else
+              class="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground text-sm"
+            >
+              No arrival airport data available
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <!-- Top Routes Table -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center gap-2">
+            <Plane class="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0" />
+            <CardTitle class="text-base sm:text-lg">Top Flight Routes</CardTitle>
+          </div>
+          <CardDescription class="text-xs sm:text-sm">Most popular routes (FROM → TO) across all websites</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div v-if="topRoutes && topRoutes.length > 0" class="overflow-x-auto -mx-3 sm:mx-0">
+            <table class="w-full text-xs sm:text-sm min-w-[300px]">
+              <thead>
+                <tr class="border-b">
+                  <th class="text-left p-2 font-medium">Rank</th>
+                  <th class="text-left p-2 font-medium">Route</th>
+                  <th class="text-right p-2 font-medium">Requests</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(routeItem, index) in topRoutes"
+                  :key="routeItem.route"
+                  class="border-b hover:bg-muted/50"
+                >
+                  <td class="p-2">
+                    <span
+                      class="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium"
+                    >
+                      {{ index + 1 }}
+                    </span>
+                  </td>
+                  <td class="p-2">
+                    <span class="font-medium break-words">{{ routeItem.route }}</span>
+                  </td>
+                  <td class="p-2 text-right font-medium whitespace-nowrap">{{ routeItem.count.toLocaleString() }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div
+            v-else
+            class="flex h-[200px] items-center justify-center text-muted-foreground text-sm"
+          >
+            No flight route data available
           </div>
         </CardContent>
       </Card>

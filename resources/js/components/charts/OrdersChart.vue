@@ -81,6 +81,9 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
           maxRotation: 45,
           minRotation: 45,
           color: textColor,
+          font: {
+            size: 11,
+          },
         },
       },
       y: {
@@ -99,7 +102,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
 </script>
 
 <template>
-  <div class="h-[300px]">
+  <div class="h-[250px] sm:h-[300px] w-full">
     <Line :data="chartData" :options="chartOptions" />
   </div>
 </template>

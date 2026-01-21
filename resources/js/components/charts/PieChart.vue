@@ -70,13 +70,15 @@ const chartOptions = computed<ChartOptions<'pie'>>(() => {
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'right',
+        position: 'bottom',
         labels: {
           color: textColor,
-          padding: 15,
+          padding: 10,
           font: {
-            size: 12,
+            size: 11,
           },
+          boxWidth: 12,
+          boxHeight: 12,
         },
       },
       tooltip: {
@@ -104,7 +106,7 @@ const chartOptions = computed<ChartOptions<'pie'>>(() => {
 </script>
 
 <template>
-  <div class="h-[300px]">
+  <div class="h-[250px] sm:h-[300px] w-full">
     <Pie :data="chartData" :options="chartOptions" />
   </div>
 </template>

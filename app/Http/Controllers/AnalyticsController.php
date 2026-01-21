@@ -415,6 +415,11 @@ class AnalyticsController extends Controller
             ? ($paidOrdersCount / $formSubmissions) * 100 
             : 0;
 
+        // Flight Analytics
+        $topDepartureAirports = $this->topDepartureAirports($request, $startDate, $endDate, $applyFilters);
+        $topArrivalAirports = $this->topArrivalAirports($request, $startDate, $endDate, $applyFilters);
+        $topRoutes = $this->topRoutes($request, $startDate, $endDate, $applyFilters);
+
         return [
             'stats' => [
                 'total_revenue' => $totalRevenue,
@@ -447,6 +452,9 @@ class AnalyticsController extends Controller
                 'order_to_paid_rate' => $orderToPaidRate,
                 'submission_to_paid_rate' => $submissionToPaidRate,
             ],
+            'topDepartureAirports' => $topDepartureAirports,
+            'topArrivalAirports' => $topArrivalAirports,
+            'topRoutes' => $topRoutes,
             'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
             'filters' => [
                 'start_date' => $startDate->format('Y-m-d'),
@@ -512,6 +520,405 @@ class AnalyticsController extends Controller
         if ($h == 0) $h = 12;
         $ampm = $hour < 12 ? 'AM' : 'PM';
         return sprintf('%d:00 %s', $h, $ampm);
+    }
+
+    /**
+     * Extract IATA code from value (handles both codes and full names)
+     */
+    private function extractIataCode($value): ?string
+    {
+        if (is_array($value)) {
+            $value = $this->extractStringFromArray($value);
+        }
+        
+        if (!is_string($value)) {
+            return null;
+        }
+        
+        $value = trim($value);
+        
+        // PRIORITY 1: Extract code from parentheses (most common format)
+        // Example: "Madrid - Barajas Airport (MAD)" -> "MAD"
+        if (preg_match('/\(([A-Z]{3})\)/', $value, $matches)) {
+            return $matches[1];
+        }
+        
+        // PRIORITY 2: If it's already a 3-letter IATA code
+        $valueUpper = strtoupper($value);
+        if (strlen($valueUpper) === 3 && ctype_alpha($valueUpper)) {
+            return $valueUpper;
+        }
+        
+        // PRIORITY 3: Try to extract 3-letter code (uppercase letters only) with word boundaries
+        if (preg_match('/\b([A-Z]{3})\b/', strtoupper($value), $matches)) {
+            return $matches[0];
+        }
+        
+        // PRIORITY 4: Try to extract any 3 consecutive uppercase letters
+        if (preg_match('/[A-Z]{3}/', strtoupper($value), $matches)) {
+            return $matches[0];
+        }
+        
+        return null;
+    }
+
+    /**
+     * Extract string value from array
+     */
+    private function extractStringFromArray($value): ?string
+    {
+        if (!is_array($value)) {
+            return is_string($value) ? $value : null;
+        }
+        
+        // Try to find first string value
+        foreach ($value as $item) {
+            if (is_string($item) && trim($item) !== '') {
+                return $item;
+            }
+            if (is_array($item)) {
+                $nested = $this->extractStringFromArray($item);
+                if ($nested) {
+                    return $nested;
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Extract flight routes from a payload (supports both JSON flight data and form fields)
+     * Returns array of routes, each route has 'departure' and 'arrival' IATA codes
+     */
+    private function extractFlightRoutes(array $payload): array
+    {
+        $routes = [];
+        
+        // Method 1: Try to extract from flight JSON (Amadeus/aviationstack format)
+        // Check multiple possible locations for flight data
+        // For Fluent Forms: payload['response'] contains form fields, but flight JSON might be in payload['response'] or payload
+        $possibleFlightData = [
+            $payload['response'] ?? null,  // Fluent Forms structure
+            $payload['response']['data'] ?? null,
+            $payload['data'] ?? null,
+            $payload,  // Direct payload (for WooCommerce orders)
+        ];
+        
+        foreach ($possibleFlightData as $flightData) {
+            if (!is_array($flightData) || empty($flightData['itineraries'])) {
+                continue;
+            }
+            
+            // Process each itinerary
+            foreach ($flightData['itineraries'] as $itinerary) {
+                if (empty($itinerary['segments']) || !is_array($itinerary['segments'])) {
+                    continue;
+                }
+                
+                $segments = $itinerary['segments'];
+                if (empty($segments)) {
+                    continue;
+                }
+                
+                // For multi-segment flights:
+                // - First segment departure = route departure
+                // - Last segment arrival = route arrival
+                // Intermediate segments should NOT inflate route counts
+                $firstSegment = $segments[0];
+                $lastSegment = $segments[count($segments) - 1];
+                
+                $departure = $firstSegment['departure']['iataCode'] ?? null;
+                $arrival = $lastSegment['arrival']['iataCode'] ?? null;
+                
+                if ($departure && $arrival) {
+                    $routes[] = [
+                        'departure' => strtoupper($departure),
+                        'arrival' => strtoupper($arrival),
+                    ];
+                }
+            }
+            
+            // If we found routes, break early
+            if (!empty($routes)) {
+                break;
+            }
+        }
+        
+        // Method 2: Fallback to form fields (flight_from, flight_to)
+        // Form fields are stored in payload['response'] for Fluent Forms submissions
+        if (empty($routes)) {
+            $departure = null;
+            $arrival = null;
+            
+            // Check payload['response'] first (Fluent Forms structure)
+            $formFields = $payload['response'] ?? $payload;
+            
+            // Handle case where payload['response'] might be a JSON string
+            if (is_string($formFields)) {
+                $decoded = json_decode($formFields, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $formFields = $decoded;
+                } else {
+                    // If it's not valid JSON, try the payload itself
+                    $formFields = $payload;
+                }
+            }
+            
+            // Ensure formFields is an array before iterating
+            if (!is_array($formFields)) {
+                // Try payload directly as fallback
+                if (is_array($payload)) {
+                    $formFields = $payload;
+                } else {
+                    return $routes;
+                }
+            }
+            
+            // Also check meta_data for WooCommerce orders
+            $metaDataFields = [];
+            if (isset($payload['meta_data']) && is_array($payload['meta_data'])) {
+                foreach ($payload['meta_data'] as $meta) {
+                    if (isset($meta['key']) && isset($meta['value'])) {
+                        $metaDataFields[$meta['key']] = $meta['value'];
+                    }
+                }
+            }
+            
+            // Merge meta_data fields with formFields for searching
+            $allFields = array_merge($formFields, $metaDataFields);
+            
+            // Try various field name patterns
+            foreach ($allFields as $key => $value) {
+                // Skip non-form fields
+                if (in_array($key, ['response', 'meta', 'order_items', 'meta_data'])) {
+                    continue;
+                }
+                
+                // Skip if value is not a string, array, or numeric (could be object, null, etc.)
+                if (!is_string($value) && !is_array($value) && !is_numeric($value)) {
+                    continue;
+                }
+                
+                $keyLower = strtolower(str_replace(['_', '-', ' '], '', $key));
+                
+                // Flight from (origin)
+                if (!$departure && (
+                    strpos($keyLower, 'flightfrom') !== false || 
+                    strpos($keyLower, 'from') !== false ||
+                    strpos($keyLower, 'origin') !== false ||
+                    strpos($keyLower, 'departurecity') !== false ||
+                    strpos($keyLower, 'departurecitycode') !== false
+                )) {
+                    $departure = $this->extractIataCode($value);
+                }
+                
+                // Flight to (destination)
+                if (!$arrival && (
+                    strpos($keyLower, 'flightto') !== false || 
+                    (strpos($keyLower, 'to') !== false && strpos($keyLower, 'from') === false) ||
+                    strpos($keyLower, 'destination') !== false ||
+                    strpos($keyLower, 'arrivalcity') !== false ||
+                    strpos($keyLower, 'arrivalcitycode') !== false
+                )) {
+                    $arrival = $this->extractIataCode($value);
+                }
+            }
+            
+            if ($departure && $arrival) {
+                $routes[] = [
+                    'departure' => strtoupper($departure),
+                    'arrival' => strtoupper($arrival),
+                ];
+            }
+        }
+        
+        return $routes;
+    }
+
+    /**
+     * Get top departure airports
+     */
+    private function topDepartureAirports(Request $request, $startDate, $endDate, $applyFilters): array
+    {
+        $departureCounts = [];
+        
+        // Process Fluent Form submissions
+        $submissionQuery = FfSubmission::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->when($request->filled('website_ids'), function ($q) use ($request) {
+                $websiteIds = is_array($request->website_ids) 
+                    ? $request->website_ids 
+                    : explode(',', $request->website_ids);
+                $websiteIds = array_map('intval', $websiteIds);
+                $q->whereIn('website_id', $websiteIds);
+            })
+            ->select('id', 'payload');
+        
+        $submissionQuery->chunk(100, function ($submissions) use (&$departureCounts) {
+            foreach ($submissions as $submission) {
+                $routes = $this->extractFlightRoutes($submission->payload ?? []);
+                foreach ($routes as $route) {
+                    if (!empty($route['departure'])) {
+                        $departureCounts[$route['departure']] = ($departureCounts[$route['departure']] ?? 0) + 1;
+                    }
+                }
+            }
+        });
+        
+        // Process WooCommerce orders
+        $orderQuery = WcOrder::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate]);
+        $orderQuery = $applyFilters($orderQuery);
+        
+        $orderQuery->select('id', 'payload')
+            ->chunk(100, function ($orders) use (&$departureCounts) {
+                foreach ($orders as $order) {
+                    $routes = $this->extractFlightRoutes($order->payload ?? []);
+                    foreach ($routes as $route) {
+                        if (!empty($route['departure'])) {
+                            $departureCounts[$route['departure']] = ($departureCounts[$route['departure']] ?? 0) + 1;
+                        }
+                    }
+                }
+            });
+        
+        arsort($departureCounts);
+        
+        return collect($departureCounts)
+            ->take(20)
+            ->map(function ($count, $airport) {
+                return [
+                    'airport' => $airport,
+                    'count' => $count,
+                ];
+            })
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Get top arrival airports
+     */
+    private function topArrivalAirports(Request $request, $startDate, $endDate, $applyFilters): array
+    {
+        $arrivalCounts = [];
+        
+        // Process Fluent Form submissions
+        $submissionQuery = FfSubmission::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->when($request->filled('website_ids'), function ($q) use ($request) {
+                $websiteIds = is_array($request->website_ids) 
+                    ? $request->website_ids 
+                    : explode(',', $request->website_ids);
+                $websiteIds = array_map('intval', $websiteIds);
+                $q->whereIn('website_id', $websiteIds);
+            })
+            ->select('id', 'payload');
+        
+        $submissionQuery->chunk(100, function ($submissions) use (&$arrivalCounts) {
+            foreach ($submissions as $submission) {
+                $routes = $this->extractFlightRoutes($submission->payload ?? []);
+                foreach ($routes as $route) {
+                    if (!empty($route['arrival'])) {
+                        $arrivalCounts[$route['arrival']] = ($arrivalCounts[$route['arrival']] ?? 0) + 1;
+                    }
+                }
+            }
+        });
+        
+        // Process WooCommerce orders
+        $orderQuery = WcOrder::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate]);
+        $orderQuery = $applyFilters($orderQuery);
+        
+        $orderQuery->select('id', 'payload')
+            ->chunk(100, function ($orders) use (&$arrivalCounts) {
+                foreach ($orders as $order) {
+                    $routes = $this->extractFlightRoutes($order->payload ?? []);
+                    foreach ($routes as $route) {
+                        if (!empty($route['arrival'])) {
+                            $arrivalCounts[$route['arrival']] = ($arrivalCounts[$route['arrival']] ?? 0) + 1;
+                        }
+                    }
+                }
+            });
+        
+        arsort($arrivalCounts);
+        
+        return collect($arrivalCounts)
+            ->take(20)
+            ->map(function ($count, $airport) {
+                return [
+                    'airport' => $airport,
+                    'count' => $count,
+                ];
+            })
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Get top routes (FROM → TO)
+     */
+    private function topRoutes(Request $request, $startDate, $endDate, $applyFilters): array
+    {
+        $routeCounts = [];
+        
+        // Process Fluent Form submissions
+        $submissionQuery = FfSubmission::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->when($request->filled('website_ids'), function ($q) use ($request) {
+                $websiteIds = is_array($request->website_ids) 
+                    ? $request->website_ids 
+                    : explode(',', $request->website_ids);
+                $websiteIds = array_map('intval', $websiteIds);
+                $q->whereIn('website_id', $websiteIds);
+            })
+            ->select('id', 'payload');
+        
+        $submissionQuery->chunk(100, function ($submissions) use (&$routeCounts) {
+            foreach ($submissions as $submission) {
+                $routes = $this->extractFlightRoutes($submission->payload ?? []);
+                foreach ($routes as $route) {
+                    if (!empty($route['departure']) && !empty($route['arrival'])) {
+                        $routeKey = $route['departure'] . ' → ' . $route['arrival'];
+                        $routeCounts[$routeKey] = ($routeCounts[$routeKey] ?? 0) + 1;
+                    }
+                }
+            }
+        });
+        
+        // Process WooCommerce orders
+        $orderQuery = WcOrder::query()
+            ->whereBetween('created_at_wp', [$startDate, $endDate]);
+        $orderQuery = $applyFilters($orderQuery);
+        
+        $orderQuery->select('id', 'payload')
+            ->chunk(100, function ($orders) use (&$routeCounts) {
+                foreach ($orders as $order) {
+                    $routes = $this->extractFlightRoutes($order->payload ?? []);
+                    foreach ($routes as $route) {
+                        if (!empty($route['departure']) && !empty($route['arrival'])) {
+                            $routeKey = $route['departure'] . ' → ' . $route['arrival'];
+                            $routeCounts[$routeKey] = ($routeCounts[$routeKey] ?? 0) + 1;
+                        }
+                    }
+                }
+            });
+        
+        arsort($routeCounts);
+        
+        return collect($routeCounts)
+            ->take(20)
+            ->map(function ($count, $route) {
+                return [
+                    'route' => $route,
+                    'count' => $count,
+                ];
+            })
+            ->values()
+            ->toArray();
     }
 }
 

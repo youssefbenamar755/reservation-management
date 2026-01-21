@@ -82,6 +82,9 @@ const chartOptions = computed<ChartOptions<'bar'>>(() => {
           color: textColor,
           maxRotation: 45,
           minRotation: 0,
+          font: {
+            size: 11,
+          },
         },
       },
       y: {
@@ -100,7 +103,7 @@ const chartOptions = computed<ChartOptions<'bar'>>(() => {
 </script>
 
 <template>
-  <div class="h-[300px]">
+  <div class="h-[250px] sm:h-[300px] w-full">
     <Bar :data="chartData" :options="chartOptions" />
   </div>
 </template>
