@@ -15,8 +15,15 @@ class WcOrderController extends Controller
 {
     public function index(Request $request)
     {
+        $user = auth()->user();
+        
+        // Get user's website IDs for filtering
+        $userWebsiteIds = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            ->pluck('id');
+        
         $orders = WcOrder::query()
             ->with('website')
+            ->whereIn('website_id', $userWebsiteIds) // Only show orders from user's websites
             ->when($request->website_id, fn ($q) =>
                 $q->where('website_id', $request->website_id)
             )
@@ -37,13 +44,17 @@ class WcOrderController extends Controller
 
         return Inertia::render('Orders/Index', [
             'orders' => $orders,
-            'websites' => Website::select('id', 'name')->get(),
+            'websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+                ->select('id', 'name')
+                ->get(),
             'filters' => $request->only(['website_id', 'status', 'search']),
         ]);
     }
 
     public function show(WcOrder $order)
     {
+        $this->authorize('view', $order);
+        
         $order->load('website');
         $website = $order->website;
 
@@ -144,6 +155,8 @@ class WcOrderController extends Controller
 
     public function update(Request $request, WcOrder $order)
     {
+        $this->authorize('update', $order);
+        
         $request->validate([
             'status' => 'required|string|in:pending,processing,on-hold,completed,cancelled,refunded,failed',
         ]);
@@ -159,12 +172,10 @@ class WcOrderController extends Controller
                 $endpoint = "{$baseUrl}/wp-json/wc/v3/orders/{$order->wp_order_id}";
 
                 $response = Http::timeout(15)
+                    ->withBasicAuth($website->wc_consumer_key, $website->wc_consumer_secret)
                     ->acceptJson()
                     ->asJson()
-                    ->put($endpoint . '?' . http_build_query([
-                        'consumer_key' => $website->wc_consumer_key,
-                        'consumer_secret' => $website->wc_consumer_secret,
-                    ]), [
+                    ->put($endpoint, [
                         'status' => $request->status,
                     ]);
 
@@ -237,6 +248,8 @@ class WcOrderController extends Controller
      */
     public function generateAmadeusCode(WcOrder $order, AmadeusDummyTicketGeneratorService $service)
     {
+        $this->authorize('generateAmadeusCode', $order);
+        
         // Find the linked Fluent Forms submission
         $payload = $order->payload ?? [];
         $metaData = data_get($payload, 'meta_data', []);

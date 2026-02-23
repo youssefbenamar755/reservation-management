@@ -23,17 +23,29 @@ require __DIR__.'/settings.php';
 
 
 Route::middleware(['auth'])->group(function () {
+    // Sync routes with rate limiting
     Route::post('websites/sync-all-woocommerce-orders', [WebsiteController::class, 'syncAllWooCommerceOrders'])
+        ->middleware('throttle:sync')
         ->name('websites.sync-all-woocommerce-orders');
+    
     Route::resource('websites', WebsiteController::class);
+    
     Route::post('websites/{website}/test-woocommerce', [WebsiteController::class, 'testWooCommerce'])
         ->name('websites.test-woocommerce');
     Route::post('websites/{website}/test-fluent-forms', [WebsiteController::class, 'testFluentForms'])
         ->name('websites.test-fluent-forms');
+    
     Route::post('websites/{website}/sync-woocommerce-orders', [WebsiteController::class, 'syncWooCommerceOrders'])
+        ->middleware('throttle:sync')
         ->name('websites.sync-woocommerce-orders');
     Route::post('websites/{website}/sync-fluent-form', [WebsiteController::class, 'syncFluentForm'])
+        ->middleware('throttle:sync')
         ->name('websites.sync-fluent-form');
+    
+    // Reveal webhook secrets (requires password confirmation)
+    Route::post('websites/{website}/reveal-webhook-secrets', [WebsiteController::class, 'revealWebhookSecrets'])
+        ->middleware('password.confirm')
+        ->name('websites.reveal-webhook-secrets');
 });
 Route::middleware(['auth'])->group(function () {
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
@@ -56,9 +68,13 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/submissions/entries/{entry}/download-pdf', [FfSubmissionController::class, 'downloadPnrPdf'])->name('submissions.download-pdf');
     Route::delete('/submissions/entries/{entry}', [FfSubmissionController::class, 'destroy'])->name('submissions.destroy');
     
-    // Form schema sync routes
-    Route::post('/submissions/forms/{website}/{form_id}/sync-schema', [FfSubmissionController::class, 'syncFormSchema'])->name('submissions.sync-form-schema');
-    Route::post('/submissions/forms/{website}/sync-all-schemas', [FfSubmissionController::class, 'syncAllFormSchemas'])->name('submissions.sync-all-schemas');
+    // Form schema sync routes with rate limiting
+    Route::post('/submissions/forms/{website}/{form_id}/sync-schema', [FfSubmissionController::class, 'syncFormSchema'])
+        ->middleware('throttle:sync')
+        ->name('submissions.sync-form-schema');
+    Route::post('/submissions/forms/{website}/sync-all-schemas', [FfSubmissionController::class, 'syncAllFormSchemas'])
+        ->middleware('throttle:sync')
+        ->name('submissions.sync-all-schemas');
     
     // Delete all submissions for a form
     Route::delete('/submissions/forms/{website}/{form_id}', [FfSubmissionController::class, 'destroyAll'])->name('submissions.destroy-all');

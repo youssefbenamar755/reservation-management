@@ -14,25 +14,32 @@ class DashboardController extends Controller
 {
     public function __invoke(Request $request)
     {
+        $user = auth()->user();
+        
+        // Get user's website IDs for filtering
+        $userWebsiteIds = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            ->pluck('id');
+        
         // Get start and end of current month
         $startOfMonth = now()->startOfMonth();
         $endOfMonth = now()->endOfMonth();
 
-        // Overall Statistics
+        // Overall Statistics (filtered by user's websites)
         $stats = [
-            'total_websites' => Website::count(),
-            'active_websites' => Website::where('status', 'active')->count(),
-            'total_orders' => WcOrder::whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
-            'total_submissions' => FfSubmission::whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
-            'total_revenue' => WcOrder::where('status', 'completed')
+            'total_websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))->count(),
+            'active_websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))->where('status', 'active')->count(),
+            'total_orders' => WcOrder::whereIn('website_id', $userWebsiteIds)->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
+            'total_submissions' => FfSubmission::whereIn('website_id', $userWebsiteIds)->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])->count(),
+            'total_revenue' => WcOrder::whereIn('website_id', $userWebsiteIds)->where('status', 'completed')
                 ->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])
                 ->sum('total'),
-            'pending_webhooks' => WebhookEvent::where('status', 'queued')->count(),
-            'failed_webhooks' => WebhookEvent::where('status', 'failed')->count(),
+            'pending_webhooks' => WebhookEvent::whereIn('website_id', $userWebsiteIds)->where('status', 'queued')->count(),
+            'failed_webhooks' => WebhookEvent::whereIn('website_id', $userWebsiteIds)->where('status', 'failed')->count(),
         ];
 
         // Orders by Status (This Month)
         $ordersByStatus = WcOrder::select('status', DB::raw('count(*) as count'))
+            ->whereIn('website_id', $userWebsiteIds)
             ->whereBetween('created_at_wp', [$startOfMonth, $endOfMonth])
             ->groupBy('status')
             ->get()
@@ -42,6 +49,7 @@ class DashboardController extends Controller
         // Orders by Website (This Month)
         $ordersByWebsite = WcOrder::select('websites.name', DB::raw('count(wc_orders.id) as count'))
             ->join('websites', 'wc_orders.website_id', '=', 'websites.id')
+            ->whereIn('wc_orders.website_id', $userWebsiteIds)
             ->whereBetween('wc_orders.created_at_wp', [$startOfMonth, $endOfMonth])
             ->groupBy('websites.id', 'websites.name')
             ->orderByDesc('count')
@@ -57,6 +65,7 @@ class DashboardController extends Controller
                 DB::raw('DATE(created_at_wp) as date'),
                 DB::raw('count(*) as count')
             )
+            ->whereIn('website_id', $userWebsiteIds)
             ->where('created_at_wp', '>=', now()->subDays(30))
             ->groupBy('date')
             ->orderBy('date')
@@ -71,6 +80,7 @@ class DashboardController extends Controller
                 DB::raw('DATE(created_at_wp) as date'),
                 DB::raw('SUM(total) as revenue')
             )
+            ->whereIn('website_id', $userWebsiteIds)
             ->where('status', 'completed')
             ->where('created_at_wp', '>=', now()->subDays(30))
             ->groupBy('date')
@@ -83,6 +93,7 @@ class DashboardController extends Controller
 
         // Recent Orders
         $recentOrders = WcOrder::with('website')
+            ->whereIn('website_id', $userWebsiteIds)
             ->latest('created_at_wp')
             ->limit(10)
             ->get()
@@ -100,6 +111,7 @@ class DashboardController extends Controller
 
         // Recent Form Submissions
         $recentSubmissions = FfSubmission::with('website')
+            ->whereIn('website_id', $userWebsiteIds)
             ->latest('created_at_wp')
             ->limit(10)
             ->get()
@@ -113,7 +125,8 @@ class DashboardController extends Controller
             ]);
 
         // Website Health Status
-        $websiteHealth = Website::withCount([
+        $websiteHealth = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            ->withCount([
                 'wcOrders',
                 'ffSubmissions',
                 'webhookEvents' => fn ($query) => $query->where('status', 'failed'),
@@ -133,9 +146,9 @@ class DashboardController extends Controller
 
         // Webhook Events Status
         $webhookStatus = [
-            'queued' => WebhookEvent::where('status', 'queued')->count(),
-            'processed' => WebhookEvent::where('status', 'processed')->count(),
-            'failed' => WebhookEvent::where('status', 'failed')->count(),
+            'queued' => WebhookEvent::whereIn('website_id', $userWebsiteIds)->where('status', 'queued')->count(),
+            'processed' => WebhookEvent::whereIn('website_id', $userWebsiteIds)->where('status', 'processed')->count(),
+            'failed' => WebhookEvent::whereIn('website_id', $userWebsiteIds)->where('status', 'failed')->count(),
         ];
 
         return Inertia::render('Dashboard', [

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Website;
 use App\Models\WebhookEvent;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use App\Jobs\ProcessWooWebhookEvent;
 
 class WooWebhookController extends Controller
@@ -19,32 +20,63 @@ class WooWebhookController extends Controller
         // Basic validation: Check if website is active
         abort_if($website->status !== 'active', 403, 'Website is not active');
 
+        // Validate WooCommerce webhook signature — both signature header AND secret are required
+        $signature = $request->header('X-WC-Webhook-Signature');
+
+        if (!$signature || !$website->wc_webhook_secret) {
+            Log::warning('WooCommerce webhook rejected: missing signature or secret not configured', [
+                'website_id'    => $website->id,
+                'website_slug'  => $website->slug,
+                'has_signature' => (bool) $signature,
+                'has_secret'    => (bool) $website->wc_webhook_secret,
+                'ip'            => $request->ip(),
+            ]);
+            abort(403, 'Webhook signature required');
+        }
+
+        // Read raw body ONCE — reuse for both HMAC and payload parsing.
+        // Important: $request->all() returns empty for JSON bodies after getContent() on some setups.
+        $rawBody = $request->getContent();
+
+        $expectedSignature = base64_encode(
+            hash_hmac('sha256', $rawBody, $website->wc_webhook_secret, true)
+        );
+
+        if (!hash_equals($expectedSignature, $signature)) {
+            Log::warning('WooCommerce webhook signature validation failed', [
+                'website_id'   => $website->id,
+                'website_slug' => $website->slug,
+                'topic'        => $request->header('X-WC-Webhook-Topic'),
+                'ip'           => $request->ip(),
+            ]);
+            abort(403, 'Invalid webhook signature');
+        }
+
+        // Parse JSON payload from the raw body (not $request->all() which may be empty for JSON)
+        $parsedPayload = json_decode($rawBody, true);
+
+        if (!is_array($parsedPayload)) {
+            Log::error('WooCommerce webhook: failed to parse JSON body', [
+                'website_id' => $website->id,
+                'raw_body'   => substr($rawBody, 0, 500),
+            ]);
+            // Return 200 anyway so WooCommerce doesn't keep retrying a malformed payload
+            return response()->json(['ok' => false, 'error' => 'Invalid JSON payload']);
+        }
+
         // Store the webhook event (RAW DATA)
         $event = WebhookEvent::create([
-            'website_id' => $website->id,
-
-            // Identify where it came from
-            'source' => 'woocommerce',
-
-            // Woo sends this header automatically
-            'topic' => $request->header('X-WC-Webhook-Topic', 'unknown'),
-
-            // Woo order ID (if present)
-            'external_id' => data_get($request->all(), 'id'),
-
-            // We'll validate signatures later
-            // TODO: Add WooCommerce webhook signature validation
+            'website_id'     => $website->id,
+            'source'         => 'woocommerce',
+            'topic'          => $request->header('X-WC-Webhook-Topic', 'unknown'),
+            'external_id'    => $parsedPayload['id'] ?? null,   // WC order ID
             'signature_valid' => true,
-
-            // Store EVERYTHING as JSON
-            'payload' => $request->all(),
-
-            // Explicitly set received_at
-            'received_at' => now(),
+            'payload'        => $parsedPayload,                  // parsed, not $request->all()
+            'received_at'    => now(),
         ]);
-        
-        // Dispatch job to process the webhook asynchronously
-        ProcessWooWebhookEvent::dispatchSync($event->id);
+
+        // Dispatch job to process the webhook asynchronously (quick 200 OK back to WooCommerce)
+        ProcessWooWebhookEvent::dispatch($event->id);
 
         // Track last webhook time (useful for monitoring)
         $website->update([

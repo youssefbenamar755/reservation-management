@@ -88,6 +88,7 @@ class AnalyticsController extends Controller
     private function getCacheKey(Request $request): string
     {
         $filters = [
+            'user_id' => auth()->id(), // Include user ID in cache key
             'start_date' => $request->input('start_date', 'default'),
             'end_date' => $request->input('end_date', 'default'),
             'website_ids' => $request->input('website_ids', []),
@@ -102,6 +103,13 @@ class AnalyticsController extends Controller
      */
     private function calculateAnalyticsData(Request $request): array
     {
+        $user = auth()->user();
+        
+        // Get user's website IDs for filtering
+        $userWebsiteIds = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            ->pluck('id')
+            ->toArray();
+        
         // Parse date range filters
         $startDate = $request->input('start_date') 
             ? Carbon::parse($request->input('start_date'))->startOfDay()
@@ -112,13 +120,16 @@ class AnalyticsController extends Controller
             : now()->endOfDay();
 
         // Build filter closure to reuse
-        $applyFilters = function ($query) use ($request) {
+        $applyFilters = function ($query) use ($request, $userWebsiteIds) {
             return $query
-                ->when($request->filled('website_ids'), function ($q) use ($request) {
+                ->whereIn('website_id', $userWebsiteIds) // Only show data from user's websites
+                ->when($request->filled('website_ids'), function ($q) use ($request, $userWebsiteIds) {
                     $websiteIds = is_array($request->website_ids) 
                         ? $request->website_ids 
                         : explode(',', $request->website_ids);
                     $websiteIds = array_map('intval', $websiteIds);
+                    // Only allow filtering by websites the user owns
+                    $websiteIds = array_intersect($websiteIds, $userWebsiteIds);
                     $q->whereIn('website_id', $websiteIds);
                 })
                 ->when($request->filled('payment_status'), function ($q) use ($request) {
@@ -455,7 +466,11 @@ class AnalyticsController extends Controller
             'topDepartureAirports' => $topDepartureAirports,
             'topArrivalAirports' => $topArrivalAirports,
             'topRoutes' => $topRoutes,
-            'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
+            'websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+                ->select('id', 'name')
+                ->orderBy('name')
+                ->get()
+                ->toArray(),
             'filters' => [
                 'start_date' => $startDate->format('Y-m-d'),
                 'end_date' => $endDate->format('Y-m-d'),
@@ -765,32 +780,15 @@ class AnalyticsController extends Controller
                 }
             }
         });
-        
-        // Process WooCommerce orders
-        $orderQuery = WcOrder::query()
-            ->whereBetween('created_at_wp', [$startDate, $endDate]);
-        $orderQuery = $applyFilters($orderQuery);
-        
-        $orderQuery->select('id', 'payload')
-            ->chunk(100, function ($orders) use (&$departureCounts) {
-                foreach ($orders as $order) {
-                    $routes = $this->extractFlightRoutes($order->payload ?? []);
-                    foreach ($routes as $route) {
-                        if (!empty($route['departure'])) {
-                            $departureCounts[$route['departure']] = ($departureCounts[$route['departure']] ?? 0) + 1;
-                        }
-                    }
-                }
-            });
-        
+
         arsort($departureCounts);
-        
+
         return collect($departureCounts)
             ->take(20)
             ->map(function ($count, $airport) {
                 return [
                     'airport' => $airport,
-                    'count' => $count,
+                    'count'   => $count,
                 ];
             })
             ->values()
@@ -826,32 +824,15 @@ class AnalyticsController extends Controller
                 }
             }
         });
-        
-        // Process WooCommerce orders
-        $orderQuery = WcOrder::query()
-            ->whereBetween('created_at_wp', [$startDate, $endDate]);
-        $orderQuery = $applyFilters($orderQuery);
-        
-        $orderQuery->select('id', 'payload')
-            ->chunk(100, function ($orders) use (&$arrivalCounts) {
-                foreach ($orders as $order) {
-                    $routes = $this->extractFlightRoutes($order->payload ?? []);
-                    foreach ($routes as $route) {
-                        if (!empty($route['arrival'])) {
-                            $arrivalCounts[$route['arrival']] = ($arrivalCounts[$route['arrival']] ?? 0) + 1;
-                        }
-                    }
-                }
-            });
-        
+
         arsort($arrivalCounts);
-        
+
         return collect($arrivalCounts)
             ->take(20)
             ->map(function ($count, $airport) {
                 return [
                     'airport' => $airport,
-                    'count' => $count,
+                    'count'   => $count,
                 ];
             })
             ->values()
@@ -888,27 +869,9 @@ class AnalyticsController extends Controller
                 }
             }
         });
-        
-        // Process WooCommerce orders
-        $orderQuery = WcOrder::query()
-            ->whereBetween('created_at_wp', [$startDate, $endDate]);
-        $orderQuery = $applyFilters($orderQuery);
-        
-        $orderQuery->select('id', 'payload')
-            ->chunk(100, function ($orders) use (&$routeCounts) {
-                foreach ($orders as $order) {
-                    $routes = $this->extractFlightRoutes($order->payload ?? []);
-                    foreach ($routes as $route) {
-                        if (!empty($route['departure']) && !empty($route['arrival'])) {
-                            $routeKey = $route['departure'] . ' → ' . $route['arrival'];
-                            $routeCounts[$routeKey] = ($routeCounts[$routeKey] ?? 0) + 1;
-                        }
-                    }
-                }
-            });
-        
+
         arsort($routeCounts);
-        
+
         return collect($routeCounts)
             ->take(20)
             ->map(function ($count, $route) {

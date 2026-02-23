@@ -172,16 +172,26 @@ function setDatePreset(preset: '7d' | '30d' | '90d' | 'thisMonth' | 'lastMonth' 
       break
     case 'lastMonth':
       start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-      end.setDate(0) // Last day of previous month
+      // Last day of previous month: month 0 means day 0 of current month
+      end.setFullYear(today.getFullYear(), today.getMonth(), 0)
       break
     case 'thisYear':
       start = new Date(today.getFullYear(), 0, 1)
       break
   }
 
-  startDate.value = start.toISOString().split('T')[0]
-  endDate.value = end.toISOString().split('T')[0]
+  // Use local date formatting (NOT toISOString which converts to UTC and can shift the date back)
+  startDate.value = formatLocalDate(start)
+  endDate.value = formatLocalDate(end)
   applyFilters()
+}
+
+/** Format a Date as YYYY-MM-DD using local timezone (avoids UTC offset shifting day) */
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 function resetFilters() {

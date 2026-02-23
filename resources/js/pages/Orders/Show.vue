@@ -528,10 +528,9 @@ const flightData = computed(() => {
                   <CreditCard class="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <p class="text-sm font-medium">Payment Method</p>
                 </div>
-                <div
-                  class="text-sm text-muted-foreground break-words"
-                  v-html="decodeHtml(paymentMethod)"
-                ></div>
+                <div class="text-sm text-muted-foreground break-words">
+                  {{ decodeHtml(paymentMethod) }}
+                </div>
               </div>
 
               <div v-if="payload.shipping_lines && payload.shipping_lines.length > 0">

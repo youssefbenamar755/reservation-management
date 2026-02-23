@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class Website extends Model
 {
     protected $fillable = [
-        'name','slug','base_url',
-        'wc_consumer_key','wc_consumer_secret',
+        'user_id','name','slug','base_url',
+        'wc_consumer_key','wc_consumer_secret','wc_webhook_secret',
         'ff_api_key','ff_username','ff_app_password','webhook_secret',
         'timezone','status',
         'last_sync_at','last_webhook_at',
@@ -20,6 +20,7 @@ class Website extends Model
     protected $hidden = [
         'wc_consumer_key',
         'wc_consumer_secret',
+        'wc_webhook_secret',
         'ff_api_key',
         'ff_username',
         'ff_app_password',
@@ -29,6 +30,7 @@ class Website extends Model
     protected $casts = [
         'wc_consumer_key' => 'encrypted',
         'wc_consumer_secret' => 'encrypted',
+        'wc_webhook_secret' => 'encrypted',
         'ff_api_key' => 'encrypted',
         'ff_username' => 'encrypted',
         'ff_app_password' => 'encrypted',
@@ -50,5 +52,26 @@ class Website extends Model
     public function webhookEvents()
     {
         return $this->hasMany(WebhookEvent::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Scope a query to only include websites owned by a specific user.
+     */
+    public function scopeForUser($query, $userId)
+    {
+        return $query->where('user_id', $userId);
+    }
+
+    /**
+     * Check if the website belongs to a specific user.
+     */
+    public function belongsToUser($userId): bool
+    {
+        return $this->user_id === $userId;
     }
 }

@@ -61,4 +61,12 @@ class User extends Authenticatable
     {
         return 'App.Models.User.' . $this->id;
     }
+
+    /**
+     * Get all websites owned by the user.
+     */
+    public function websites()
+    {
+        return $this->hasMany(Website::class);
+    }
 }

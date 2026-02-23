@@ -22,6 +22,12 @@ class FfSubmissionController extends Controller
      */
     public function index(Request $request)
     {
+        $user = auth()->user();
+        
+        // Get user's website IDs for filtering
+        $userWebsiteIds = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            ->pluck('id');
+        
         // Group submissions by website_id + form_id
         $forms = FfSubmission::query()
             ->select([
@@ -32,6 +38,7 @@ class FfSubmissionController extends Controller
                 DB::raw('(SELECT email FROM ff_submissions fs2 WHERE fs2.website_id = ff_submissions.website_id AND fs2.form_id = ff_submissions.form_id AND fs2.email IS NOT NULL ORDER BY fs2.created_at_wp DESC LIMIT 1) as latest_email'),
             ])
             ->with('website:id,name')
+            ->whereIn('website_id', $userWebsiteIds) // Only show submissions from user's websites
             ->groupBy('website_id', 'form_id')
             ->when($request->website_id, fn ($q) =>
                 $q->where('website_id', $request->website_id)
@@ -69,7 +76,9 @@ class FfSubmissionController extends Controller
 
         return Inertia::render('Submissions/Index', [
             'forms' => $forms,
-            'websites' => Website::select('id', 'name')->get(),
+            'websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+                ->select('id', 'name')
+                ->get(),
             'filters' => $request->only(['website_id']),
         ]);
     }
@@ -79,6 +88,9 @@ class FfSubmissionController extends Controller
      */
     public function getFormsForWebsite(Website $website)
     {
+        // Authorize that user can view this website
+        $this->authorize('view', $website);
+        
         if (empty($website->ff_username) || empty($website->ff_app_password)) {
             return response()->json(['error' => 'Fluent Forms credentials not configured'], 400);
         }
@@ -136,6 +148,9 @@ class FfSubmissionController extends Controller
      */
     public function formEntries(Website $website, int $formId)
     {
+        // Authorize that user can view this website
+        $this->authorize('view', $website);
+        
         $entries = FfSubmission::query()
             ->where('website_id', $website->id)
             ->where('form_id', $formId)
@@ -167,6 +182,8 @@ class FfSubmissionController extends Controller
      */
     public function entryDetails(FfSubmission $entry)
     {
+        $this->authorize('view', $entry);
+        
         // Load form schema if available
         $formSchema = FfForm::where('website_id', $entry->website_id)
             ->where('form_id', $entry->form_id)
@@ -294,6 +311,8 @@ class FfSubmissionController extends Controller
      */
     public function destroy(FfSubmission $entry)
     {
+        $this->authorize('delete', $entry);
+        
         $entryId = $entry->entry_id;
         $formId = $entry->form_id;
         $websiteId = $entry->website_id;
@@ -308,6 +327,9 @@ class FfSubmissionController extends Controller
      */
     public function destroyAll(Website $website, int $formId)
     {
+        // Authorize that user can delete from this website
+        $this->authorize('delete', $website);
+        
         $deletedCount = FfSubmission::where('website_id', $website->id)
             ->where('form_id', $formId)
             ->delete();
@@ -321,6 +343,8 @@ class FfSubmissionController extends Controller
      */
     public function generateAmadeusCode(FfSubmission $entry, AmadeusDummyTicketGeneratorService $service)
     {
+        $this->authorize('generateAmadeusCode', $entry);
+        
         try {
             $payload = $entry->payload ?? [];
             $response = $payload['response'] ?? [];
@@ -409,6 +433,8 @@ class FfSubmissionController extends Controller
         PnrGenerationService $pnrService,
         DummyTicketPdfService $pdfService
     ) {
+        $this->authorize('generatePnr', $submission);
+        
         // Abort if submission doesn't exist (route model binding failed)
         if (!$submission->exists) {
             Log::error('PNR generation failed: Submission not found', [
@@ -543,6 +569,8 @@ class FfSubmissionController extends Controller
         PnrGenerationService $pnrService,
         DummyTicketPdfService $pdfService
     ) {
+        $this->authorize('downloadPdf', $entry);
+        
         $submission = $entry; // Alias for consistency with other code
         
         // Always regenerate PDF to ensure latest template is used

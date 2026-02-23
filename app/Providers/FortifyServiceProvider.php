@@ -87,5 +87,29 @@ class FortifyServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($throttleKey);
         });
+
+        // Password reset rate limiting
+        RateLimiter::for('password-reset', function (Request $request) {
+            $email = $request->input(Fortify::email());
+            $throttleKey = Str::transliterate(Str::lower($email).'|'.$request->ip());
+
+            return Limit::perHour(3)->by($throttleKey)
+                ->response(function () {
+                    return back()->with('error', 'Too many password reset attempts. Please try again later.');
+                });
+        });
+
+        // Sync operations rate limiting (WooCommerce/Fluent Forms)
+        RateLimiter::for('sync', function (Request $request) {
+            return Limit::perMinute(3)->by($request->user()->id ?? $request->ip())
+                ->response(function () {
+                    return back()->with('error', 'Please wait before syncing again. Maximum 3 sync operations per minute.');
+                });
+        });
+
+        // Webhook rate limiting
+        RateLimiter::for('webhook', function (Request $request) {
+            return Limit::perMinute(60)->by($request->ip());
+        });
     }
 }

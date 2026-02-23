@@ -26,3 +26,12 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Debug / build logs in project root
+*.log
+tsc_*.txt
+tsc_*.log
+build_output.log
+test_results.txt
+test_output*.log
+failure.log

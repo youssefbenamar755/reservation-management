@@ -77,6 +77,17 @@ function goToPage(url: string | null) {
   }
 }
 
+/**
+ * Safely decode HTML entities without rendering HTML tags
+ * This prevents XSS while still allowing entities like &laquo; and &raquo; to display correctly
+ */
+function decodeHtmlEntities(text: string): string {
+  if (!text) return ''
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = text
+  return textarea.value
+}
+
 function formatDate(dateString: string | null) {
   if (!dateString) return '—'
   const date = new Date(dateString)
@@ -459,7 +470,7 @@ function syncFormSchema() {
                   }"
                   @click="goToPage(link.url)"
                 >
-                  <span v-html="link.label"></span>
+                  <span>{{ decodeHtmlEntities(link.label) }}</span>
                 </Button>
                 <span
                   v-else-if="link.label === '...'"

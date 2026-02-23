@@ -14,9 +14,13 @@ class WebsiteController extends Controller
 {
     public function index()
     {
+        $user = auth()->user();
+        
         $websites = Website::query()
+            ->when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
             ->select([
                 'id',
+                'user_id',
                 'name',
                 'slug',
                 'base_url',
@@ -40,8 +44,8 @@ class WebsiteController extends Controller
                 'created_at' => optional($website->created_at)->toISOString(),
                 'webhooks' => [
                     'woocommerce' => url("/api/v1/webhooks/woocommerce/{$website->slug}"),
-                    // tokenized URL for Fluent Forms (required by our controller)
-                    'fluentforms' => url("/api/v1/webhooks/fluentforms/{$website->slug}") . '?token=' . $website->webhook_secret,
+                    // Show URL structure without exposing the secret
+                    'fluentforms' => url("/api/v1/webhooks/fluentforms/{$website->slug}") . '?token=***HIDDEN***',
                 ],
             ]);
 
@@ -64,13 +68,15 @@ class WebsiteController extends Controller
             'wc_consumer_secret' => 'nullable|string',
             'ff_username' => 'nullable|string',
             'ff_app_password' => 'nullable|string',
-            'timezone' => 'nullable|string|max:255',
+            'timezone' => 'nullable|timezone',
         ]);
 
         $data['slug'] = Str::slug($data['name']) . '-' . Str::random(5);
-        $data['webhook_secret'] = Str::random(40);
+        $data['webhook_secret'] = Str::random(40); // For Fluent Forms
+        $data['wc_webhook_secret'] = 'wc_' . Str::random(40); // For WooCommerce
         $data['status'] = 'active';
         $data['timezone'] = $data['timezone'] ?? 'UTC';
+        $data['user_id'] = auth()->id(); // Assign to current user
 
         Website::create($data);
 
@@ -80,11 +86,13 @@ class WebsiteController extends Controller
 
     public function show(Website $website)
     {
+        $this->authorize('view', $website);
         return redirect()->route('websites.edit', $website);
     }
 
     public function edit(Website $website)
     {
+        $this->authorize('view', $website);
         return Inertia::render('Websites/Edit', [
             'website' => [
                 'id' => $website->id,
@@ -97,7 +105,9 @@ class WebsiteController extends Controller
                 'last_sync_at' => optional($website->last_sync_at)->toISOString(),
                 'webhooks' => [
                     'woocommerce' => url("/api/v1/webhooks/woocommerce/{$website->slug}"),
-                    'fluentforms' => url("/api/v1/webhooks/fluentforms/{$website->slug}") . '?token=' . $website->webhook_secret,
+                    // Show URL structure without exposing the secret
+                    'fluentforms' => url("/api/v1/webhooks/fluentforms/{$website->slug}") . '?token=***HIDDEN***',
+                    // Note: Actual secrets can be revealed via separate endpoint with password confirmation
                 ],
             ],
         ]);
@@ -105,6 +115,8 @@ class WebsiteController extends Controller
 
     public function update(Request $request, Website $website)
     {
+        $this->authorize('update', $website);
+        
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'base_url' => 'required|url',
@@ -113,7 +125,7 @@ class WebsiteController extends Controller
             'ff_username' => 'nullable|string',
             'ff_app_password' => 'nullable|string',
             'status' => 'required|in:active,paused',
-            'timezone' => 'nullable|string|max:255',
+            'timezone' => 'nullable|timezone',
         ]);
 
         // Only update credentials if they are provided (not empty)
@@ -138,6 +150,8 @@ class WebsiteController extends Controller
 
     public function destroy(Website $website)
     {
+        $this->authorize('delete', $website);
+        
         $website->delete();
 
         return redirect()->route('websites.index')
@@ -146,6 +160,8 @@ class WebsiteController extends Controller
 
     public function testWooCommerce(Request $request, Website $website)
     {
+        $this->authorize('view', $website);
+        
         if (! $website->wc_consumer_key || ! $website->wc_consumer_secret) {
             return back()->with('error', 'WooCommerce API credentials are missing. Please save Consumer Key and Secret first.');
         }
@@ -155,11 +171,9 @@ class WebsiteController extends Controller
 
         try {
             $response = Http::timeout(10)
+                ->withBasicAuth($website->wc_consumer_key, $website->wc_consumer_secret)
                 ->acceptJson()
-                ->get($endpoint, [
-                    'consumer_key' => $website->wc_consumer_key,
-                    'consumer_secret' => $website->wc_consumer_secret,
-                ]);
+                ->get($endpoint);
 
             if ($response->successful()) {
                 $woo = $response->json();
@@ -184,6 +198,8 @@ class WebsiteController extends Controller
 
     public function testFluentForms(Request $request, Website $website)
     {
+        $this->authorize('view', $website);
+        
         if (empty($website->ff_username) || empty($website->ff_app_password)) {
             return back()->with('error', 'Fluent Forms authentication credentials are missing. Please save Username and Application Password first.');
         }
@@ -253,6 +269,8 @@ class WebsiteController extends Controller
 
     public function syncWooCommerceOrders(Request $request, Website $website)
     {
+        $this->authorize('view', $website);
+        
         abort_if($website->status !== 'active', 403, 'Website is not active');
 
         $request->validate([
@@ -268,7 +286,11 @@ class WebsiteController extends Controller
 
     public function syncAllWooCommerceOrders(Request $request)
     {
-        $websites = Website::where('status', 'active')->get();
+        $user = auth()->user();
+
+        $websites = Website::where('status', 'active')
+            ->when(!$user->is_admin, fn ($q) => $q->where('user_id', $user->id))
+            ->get();
         
         if ($websites->isEmpty()) {
             return back()->with('error', 'No active websites found.');
@@ -319,14 +341,13 @@ class WebsiteController extends Controller
             // Fetch all pages of orders
             do {
                 $response = Http::timeout(20)
+                    ->withBasicAuth($website->wc_consumer_key, $website->wc_consumer_secret)
                     ->acceptJson()
                     ->get($endpoint, [
-                        'consumer_key' => $website->wc_consumer_key,
-                        'consumer_secret' => $website->wc_consumer_secret,
                         'per_page' => $perPage,
-                        'page' => $page,
-                        'orderby' => 'date',
-                        'order' => 'desc',
+                        'page'     => $page,
+                        'orderby'  => 'date',
+                        'order'    => 'desc',
                     ]);
 
                 if (! $response->successful()) {
@@ -397,8 +418,27 @@ class WebsiteController extends Controller
         }
     }
 
+    /**
+     * Reveal webhook secrets (requires password confirmation)
+     */
+    public function revealWebhookSecrets(Website $website)
+    {
+        $this->authorize('view', $website);
+        
+        return response()->json([
+            'woocommerce_secret' => $website->wc_webhook_secret,
+            'woocommerce_url' => url("/api/v1/webhooks/woocommerce/{$website->slug}"),
+            'woocommerce_instructions' => 'Configure this secret in your WooCommerce webhook settings under Advanced Options > Secret',
+            'fluentforms_secret' => $website->webhook_secret,
+            'fluentforms_url' => url("/api/v1/webhooks/fluentforms/{$website->slug}") . '?token=' . $website->webhook_secret,
+            'fluentforms_instructions' => 'Use the complete URL with token parameter in your Fluent Forms webhook configuration',
+        ]);
+    }
+
     public function syncFluentForm(Request $request, Website $website)
     {
+        $this->authorize('view', $website);
+        
         abort_if($website->status !== 'active', 403, 'Website is not active');
 
         if (empty($website->ff_username) || empty($website->ff_app_password)) {

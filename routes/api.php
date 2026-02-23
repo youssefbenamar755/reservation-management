@@ -9,7 +9,9 @@ Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
 
-Route::prefix('v1/webhooks')->group(function () {
-    Route::post('woocommerce/{website:slug}', WooWebhookController::class);
-    Route::post('fluentforms/{website:slug}', FluentWebhookController::class);
-});
+Route::prefix('v1/webhooks')
+    ->middleware(['throttle:webhook'])
+    ->group(function () {
+        Route::post('woocommerce/{website:slug}', WooWebhookController::class);
+        Route::post('fluentforms/{website:slug}', FluentWebhookController::class);
+    });

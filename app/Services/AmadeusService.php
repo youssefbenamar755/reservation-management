@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class AmadeusService
 {
@@ -16,10 +17,9 @@ class AmadeusService
 
     public function __construct()
     {
-        // Use TEST environment credentials
-        $this->clientId = config('services.amadeus.client_id', env('AMADEUS_CLIENT_ID'));
-        $this->clientSecret = config('services.amadeus.client_secret', env('AMADEUS_CLIENT_SECRET'));
-        $this->baseUrl = config('services.amadeus.base_url', 'https://test.api.amadeus.com');
+        $this->clientId     = config('amadeus.client_id');
+        $this->clientSecret = config('amadeus.client_secret');
+        $this->baseUrl      = config('amadeus.base_url', 'https://test.api.amadeus.com');
     }
 
     /**
@@ -161,36 +161,28 @@ class AmadeusService
         // REQUIREMENT: Validate it as string and acceptable pattern; use it as provided
         // Only generate a new ID if the provided one is invalid
         
-        static $offerCounter = 0; // Declare once at the top of the method
-        
         $originalId = $flightOffer['id'] ?? null;
-        
-        // Validate the provided ID
+
+        // Validate the provided ID; generate a safe fallback if missing or invalid
         if (empty($originalId)) {
-            // If ID is missing, generate one
-            $offerCounter++;
-            $flightOffer['id'] = (string)$offerCounter;
-            Log::warning('Flight offer ID was missing, generated new ID', [
+            $flightOffer['id'] = (string) Str::uuid();
+            Log::warning('Flight offer ID was missing, generated UUID fallback', [
                 'generated_id' => $flightOffer['id'],
             ]);
         } elseif (!is_string($originalId)) {
-            // If ID is not a string, convert it
-            $flightOffer['id'] = (string)$originalId;
-            Log::warning('Flight offer ID was not a string, converted to string', [
-                'original_id' => $originalId,
+            $flightOffer['id'] = (string) $originalId;
+            Log::warning('Flight offer ID was not a string, converted', [
+                'original_id'   => $originalId,
                 'original_type' => gettype($originalId),
-                'converted_id' => $flightOffer['id'],
+                'converted_id'  => $flightOffer['id'],
             ]);
         } elseif (!preg_match('/^[A-Za-z0-9_-]+$/', $originalId)) {
-            // If ID contains invalid characters, generate a new one
-            $offerCounter++;
-            $flightOffer['id'] = (string)$offerCounter;
-            Log::warning('Flight offer ID contained invalid characters, generated new ID', [
-                'original_id' => $originalId,
+            $flightOffer['id'] = (string) Str::uuid();
+            Log::warning('Flight offer ID had invalid characters, generated UUID fallback', [
+                'original_id'  => $originalId,
                 'generated_id' => $flightOffer['id'],
             ]);
         } else {
-            // ID is valid - use it as provided
             $flightOffer['id'] = $originalId;
         }
 
@@ -275,25 +267,16 @@ class AmadeusService
                     throw new \RuntimeException("Flight offer ID at index {$index} must be a string, got: " . gettype($offerId));
                 }
                 
-                // Check 3: ID must match alphanumeric pattern (letters, numbers, underscore, hyphen)
+                // ID must match alphanumeric pattern (letters, numbers, underscore, hyphen)
                 if (!preg_match('/^[A-Za-z0-9_-]+$/', $offerId)) {
                     throw new \RuntimeException("Flight offer ID at index {$index} contains invalid characters: '{$offerId}'");
                 }
-                
-                // Check 4: ID must match acceptable pattern (alphanumeric with underscore/hyphen)
-                // Note: Amadeus accepts alphanumeric IDs, not just numeric
-                if (!preg_match('/^[A-Za-z0-9_-]+$/', $offerId)) {
-                    throw new \RuntimeException("Flight offer ID at index {$index} contains invalid characters: '{$offerId}' - Must be alphanumeric (e.g., '1', 'FO123', 'offer-1')");
-                }
-                
-                // Log the validated ID
-                Log::info("Flight offer ID validated before API request", [
-                    'index' => $index,
-                    'id' => $offerId,
-                    'type' => gettype($offerId),
-                    'is_valid' => preg_match('/^[A-Za-z0-9_-]+$/', $offerId),
-                ]);
 
+                Log::info('Flight offer ID validated before API request', [
+                    'index'    => $index,
+                    'id'       => $offerId,
+                    'type'     => gettype($offerId),
+                ]);
             }
             
             // Debug log: Final IDs being sent to Amadeus
