@@ -99,7 +99,8 @@ class FfSubmissionController extends Controller
             $baseUrl = rtrim($website->base_url, '/');
             $endpoint = "{$baseUrl}/wp-json/fluentform/v1/forms";
 
-            $response = Http::timeout(10)
+            $response = Http::timeout(8)
+                ->connectTimeout(5)
                 ->withBasicAuth($website->ff_username, $website->ff_app_password)
                 ->acceptJson()
                 ->get($endpoint);
@@ -252,7 +253,8 @@ class FfSubmissionController extends Controller
             $baseUrl = rtrim($website->base_url, '/');
             $endpoint = "{$baseUrl}/wp-json/fluentform/v1/forms";
 
-            $response = Http::timeout(10)
+            $response = Http::timeout(8)
+                ->connectTimeout(5)
                 ->withBasicAuth($website->ff_username, $website->ff_app_password)
                 ->acceptJson()
                 ->get($endpoint);
