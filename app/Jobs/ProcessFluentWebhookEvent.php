@@ -3,10 +3,10 @@
 namespace App\Jobs;
 
 use App\Models\WebhookEvent;
+use App\Models\FfForm;
 use App\Models\FfSubmission;
 use App\Models\User;
 use App\Notifications\NewFormSubmissionNotification;
-use App\Services\FluentFormSchemaService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -123,11 +123,21 @@ class ProcessFluentWebhookEvent implements ShouldQueue
             }
         }
 
-        // Auto-sync form schema if not already synced
+        // Auto-sync form schema only if we don't already have one cached.
+        // Calling syncFormSchema() makes a blocking HTTP request to WordPress — expensive.
+        // If the schema is missing, dispatch a dedicated background job instead of
+        // blocking this queue worker thread.
         $website = $event->website;
         if ($website) {
-            $schemaService = app(FluentFormSchemaService::class);
-            $schemaService->syncFormSchema($website, (int) $formId);
+            $schemaExists = FfForm::where('website_id', $website->id)
+                ->where('form_id', (int) $formId)
+                ->exists();
+
+            if (!$schemaExists) {
+                // Schema not cached yet — sync in a dedicated background job
+                // so this queue worker returns immediately.
+                SyncFormSchema::dispatch($website, (int) $formId);
+            }
         }
 
         // Check if submission already exists to only notify on new submissions

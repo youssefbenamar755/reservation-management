@@ -77,12 +77,11 @@ class WcOrderController extends Controller
                 $baseUrl = rtrim($website->base_url, '/');
                 $endpoint = "{$baseUrl}/wp-json/wc/v3/orders/{$order->wp_order_id}/notes";
 
-                $response = Http::timeout(10)
+                $response = Http::timeout(8)
+                    ->connectTimeout(5)
+                    ->withBasicAuth($website->wc_consumer_key, $website->wc_consumer_secret)
                     ->acceptJson()
-                    ->get($endpoint, [
-                        'consumer_key' => $website->wc_consumer_key,
-                        'consumer_secret' => $website->wc_consumer_secret,
-                    ]);
+                    ->get($endpoint);
 
                 if ($response->successful()) {
                     $notes = $response->json();
