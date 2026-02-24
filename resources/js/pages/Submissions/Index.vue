@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
-import { Head, router } from '@inertiajs/vue3'
+import { Head, router, usePage } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { DownloadCloud, ChevronLeft, ChevronRight, Trash2 } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
+import Echo from '@/lib/echo'
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,31 @@ const availableForms = ref<Array<{ id: number; title: string }>>([])
 const isLoadingForms = ref(false)
 const isSyncing = ref(false)
 const deletingFormId = ref<string | null>(null)
+const page = usePage()
+
+// Real-time: auto-reload the submissions table when a new form submission arrives
+let echoChannel: any = null
+onMounted(() => {
+  const user = (page.props as any).auth?.user
+  if (!user) return
+  try {
+    echoChannel = Echo.private(`App.Models.User.${user.id}`)
+    echoChannel.listen('.notification', (data: any) => {
+      if (data?.type === 'form_submission') {
+        router.reload({ only: ['forms'] })
+        toast.success('New form submission received!')
+      }
+    })
+  } catch (e) {
+    console.error('Echo setup failed:', e)
+  }
+})
+onUnmounted(() => {
+  const user = (page.props as any).auth?.user
+  if (user && echoChannel) {
+    try { Echo.leave(`App.Models.User.${user.id}`) } catch {}
+  }
+})
 
 // Watch for website selection to load forms
 async function loadFormsForWebsite(websiteId: string) {

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
-import { Head, router } from '@inertiajs/vue3'
+import { Head, router, usePage } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
+import Echo from '@/lib/echo'
+import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
   orders: any
@@ -35,6 +37,32 @@ function updateFilter(key: string, value: string) {
 
 const isSyncing = ref(false)
 const selectedWebsiteId = computed(() => props.filters.website_id)
+const page = usePage()
+const toast = useToast()
+
+// Real-time: auto-reload the orders table when a new order arrives via webhook
+let echoChannel: any = null
+onMounted(() => {
+  const user = (page.props as any).auth?.user
+  if (!user) return
+  try {
+    echoChannel = Echo.private(`App.Models.User.${user.id}`)
+    echoChannel.listen('.notification', (data: any) => {
+      if (data?.type === 'order') {
+        router.reload({ only: ['orders'] })
+        toast.success('New order received!')
+      }
+    })
+  } catch (e) {
+    console.error('Echo setup failed:', e)
+  }
+})
+onUnmounted(() => {
+  const user = (page.props as any).auth?.user
+  if (user && echoChannel) {
+    try { Echo.leave(`App.Models.User.${user.id}`) } catch {}
+  }
+})
 
 function syncOrdersFromWooCommerce() {
   isSyncing.value = true
