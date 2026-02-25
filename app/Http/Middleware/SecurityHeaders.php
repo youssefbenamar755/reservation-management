@@ -26,7 +26,10 @@ class SecurityHeaders
               "style-src 'self' 'unsafe-inline'; " .
               "img-src 'self' data: https:; " .
               "font-src 'self' data:; " .
-              "connect-src 'self'; " .
+              "connect-src 'self' " .
+                  "wss://ws-eu.pusher.com " .        // Pusher WebSocket (eu cluster)
+                  "https://sockjs-eu.pusher.com " .  // Pusher XHR fallback (eu cluster)
+                  "https://stats.pusher.com; " .     // Pusher telemetry
               "frame-ancestors 'none';"
             : "default-src 'self'; " .
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " .
