@@ -163,9 +163,41 @@ class ProcessFluentWebhookEvent implements ShouldQueue
 
         // Notify all admin users if this is a new submission
         if (!$existingSubmission) {
-            User::where('is_admin', true)->each(function ($user) use ($submission) {
-                $user->notify(new NewFormSubmissionNotification($submission));
-            });
+            $adminUsers = User::where('is_admin', true)->get();
+
+            Log::info('FluentWebhook: sending notifications', [
+                'webhook_event_id' => $this->webhookEventId,
+                'submission_id'    => $submission->id,
+                'admin_users'      => $adminUsers->count(),
+                'queue_driver'     => config('queue.default'),
+                'broadcast_driver' => config('broadcasting.default'),
+            ]);
+
+            if ($adminUsers->isEmpty()) {
+                Log::warning('FluentWebhook: no admin users found — notification skipped', [
+                    'webhook_event_id' => $this->webhookEventId,
+                ]);
+            }
+
+            foreach ($adminUsers as $user) {
+                try {
+                    $user->notify(new NewFormSubmissionNotification($submission));
+                    Log::info('FluentWebhook: notification dispatched', [
+                        'user_id'       => $user->id,
+                        'submission_id' => $submission->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('FluentWebhook: notification failed', [
+                        'user_id' => $user->id,
+                        'error'   => $e->getMessage(),
+                    ]);
+                }
+            }
+        } else {
+            Log::info('FluentWebhook: duplicate submission — notification skipped', [
+                'webhook_event_id'    => $this->webhookEventId,
+                'existing_submission' => $existingSubmission->id,
+            ]);
         }
 
         $event->update([
