@@ -47,25 +47,25 @@ const page = usePage()
 
 // Real-time: auto-reload the submissions table when a new form submission arrives
 let echoChannel: any = null
+const onSubmissionNotification = (data: any) => {
+  if (data?.type === 'form_submission') {
+    router.reload({ only: ['forms'] })
+    toast.success('New form submission received!')
+  }
+}
 onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
   try {
     echoChannel = Echo.private(`App.Models.User.${user.id}`)
-    echoChannel.listen('.notification', (data: any) => {
-      if (data?.type === 'form_submission') {
-        router.reload({ only: ['forms'] })
-        toast.success('New form submission received!')
-      }
-    })
+    echoChannel.listen('.notification', onSubmissionNotification)
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
 })
 onUnmounted(() => {
-  const user = (page.props as any).auth?.user
-  if (user && echoChannel) {
-    try { Echo.leave(`App.Models.User.${user.id}`) } catch {}
+  if (echoChannel) {
+    try { echoChannel.stopListening('.notification', onSubmissionNotification) } catch {}
   }
 })
 

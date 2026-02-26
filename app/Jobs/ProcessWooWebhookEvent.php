@@ -52,7 +52,10 @@ class ProcessWooWebhookEvent implements ShouldQueue
         $isOrderCreated = str_contains($topic, 'order.created')
             || str_contains($topic, 'order_created')
             || str_contains($topic, 'new_order');
-        $isNewOrder = !$existingOrder && $isOrderCreated;
+
+        // Notify on order.created even if the order was pre-synced manually
+        // (existingOrder only prevents duplicate notifications on order.updated webhooks)
+        $isNewOrder = $isOrderCreated;
 
         Log::info('Processing WooCommerce webhook', [
             'webhook_event_id' => $this->webhookEventId,

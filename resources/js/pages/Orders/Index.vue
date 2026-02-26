@@ -42,25 +42,25 @@ const toast = useToast()
 
 // Real-time: auto-reload the orders table when a new order arrives via webhook
 let echoChannel: any = null
+const onOrderNotification = (data: any) => {
+  if (data?.type === 'order') {
+    router.reload({ only: ['orders'] })
+    toast.success('New order received!')
+  }
+}
 onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
   try {
     echoChannel = Echo.private(`App.Models.User.${user.id}`)
-    echoChannel.listen('.notification', (data: any) => {
-      if (data?.type === 'order') {
-        router.reload({ only: ['orders'] })
-        toast.success('New order received!')
-      }
-    })
+    echoChannel.listen('.notification', onOrderNotification)
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
 })
 onUnmounted(() => {
-  const user = (page.props as any).auth?.user
-  if (user && echoChannel) {
-    try { Echo.leave(`App.Models.User.${user.id}`) } catch {}
+  if (echoChannel) {
+    try { echoChannel.stopListening('.notification', onOrderNotification) } catch {}
   }
 })
 
