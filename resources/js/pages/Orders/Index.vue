@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
-import Echo from '@/lib/echo'
+import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -40,8 +40,8 @@ const selectedWebsiteId = computed(() => props.filters.website_id)
 const page = usePage()
 const toast = useToast()
 
-// Real-time: auto-reload the orders table when a new order arrives via webhook
-let echoChannel: any = null
+const { onNotification, offNotification } = useEchoNotifications()
+
 const onOrderNotification = (data: any) => {
   if (data?.type === 'order') {
     router.reload({ only: ['orders'] })
@@ -52,16 +52,13 @@ onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
   try {
-    echoChannel = Echo.private(`App.Models.User.${user.id}`)
-    echoChannel.listen('.notification', onOrderNotification)
+    onNotification('orders-index', onOrderNotification, user.id)
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
 })
 onUnmounted(() => {
-  if (echoChannel) {
-    try { echoChannel.stopListening('.notification', onOrderNotification) } catch {}
-  }
+  offNotification('orders-index')
 })
 
 function syncOrdersFromWooCommerce() {

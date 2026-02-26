@@ -11,7 +11,7 @@ import {
 import { Bell } from 'lucide-vue-next';
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
-import Echo from '@/lib/echo';
+import { useEchoNotifications } from '@/composables/useEchoNotifications';
 
 interface Notification {
     id: string;
@@ -194,7 +194,7 @@ const handleRealTimeNotification = (data: any) => {
     router.reload({ only: ['notifications'] });
 };
 
-let channel: any = null;
+const { onNotification, offNotification } = useEchoNotifications();
 
 onMounted(() => {
     const user = page.props.auth?.user;
@@ -214,29 +214,18 @@ onMounted(() => {
         localUnreadCount.value = 0;
     }
     
-    // Subscribe to private channel for real-time notifications
+    // Subscribe to shared Echo channel for real-time notifications
     try {
-        const channelName = `App.Models.User.${user.id}`;
-        channel = Echo.private(channelName);
-        
-        // Listen for notification events
-        channel.listen('.notification', (data: any) => {
+        onNotification('bell', (data: any) => {
             handleRealTimeNotification(data);
-        });
+        }, user.id);
     } catch (error) {
         console.error('Failed to setup real-time notifications:', error);
     }
 });
 
 onUnmounted(() => {
-    // Unsubscribe from channel when component is destroyed
-    if (channel) {
-        try {
-            Echo.leave(`App.Models.User.${page.props.auth?.user?.id}`);
-        } catch (error) {
-            console.error('Failed to leave channel:', error);
-        }
-    }
+    offNotification('bell');
 });
 </script>
 

@@ -3,14 +3,11 @@
 namespace App\Notifications;
 
 use App\Models\WcOrder;
-use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Notifications\Notification;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
 class NewOrderNotification extends Notification implements ShouldBroadcast
 {
-    use Queueable;
 
     public function __construct(
         public WcOrder $order
