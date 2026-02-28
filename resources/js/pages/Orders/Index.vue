@@ -36,6 +36,7 @@ function updateFilter(key: string, value: string) {
 }
 
 const isSyncing = ref(false)
+const syncProgress = ref('') // e.g. "Syncing Website A (1 / 3)…"
 const selectedWebsiteId = computed(() => props.filters.website_id)
 const page = usePage()
 const toast = useToast()
@@ -55,7 +56,6 @@ let pollingTimer: ReturnType<typeof setInterval> | null = null
 function startPolling() {
   stopPolling()
   pollingTimer = setInterval(() => {
-    // Only silently poll when on page 1 (avoids disrupting mid-pagination)
     if (!document.hidden && props.orders?.current_page === 1) {
       router.reload({ only: ['orders'] })
     }
@@ -84,24 +84,93 @@ onUnmounted(() => {
   stopPolling()
 })
 
-function syncOrdersFromWooCommerce() {
+async function syncOrdersFromWooCommerce() {
   isSyncing.value = true
+  syncProgress.value = ''
 
-  const url = selectedWebsiteId.value
-    ? `/websites/${selectedWebsiteId.value}/sync-woocommerce-orders`
-    : `/websites/sync-all-woocommerce-orders`
+  // ── Single website: fast Inertia POST (same as before) ───────────────────
+  if (selectedWebsiteId.value) {
+    router.post(
+      `/websites/${selectedWebsiteId.value}/sync-woocommerce-orders`,
+      {},
+      {
+        preserveScroll: true,
+        preserveState: true,
+        onFinish: () => {
+          isSyncing.value = false
+          syncProgress.value = ''
+        },
+      }
+    )
+    return
+  }
 
-  router.post(
-    url,
-    {},
-    {
-      preserveScroll: true,
-      preserveState: true,
-      onFinish: () => {
-        isSyncing.value = false
-      },
+  // ── All websites: sync each one independently to avoid timeout ───────────
+  // Each per-website request is short-lived; we chain them sequentially so
+  // the server never has to handle all of them in one blocking request.
+  const websites: { id: number; name: string }[] = props.websites
+
+  if (!websites.length) {
+    isSyncing.value = false
+    toast.error('No websites configured.')
+    return
+  }
+
+  let totalNew = 0
+  const errors: string[] = []
+
+  for (let i = 0; i < websites.length; i++) {
+    const w = websites[i]
+    syncProgress.value = `Syncing ${w.name} (${i + 1} / ${websites.length})…`
+
+    try {
+      const csrfMeta = document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement | null
+      const csrf = csrfMeta?.content ?? ''
+
+      const res = await fetch(`/websites/${w.id}/sync-woocommerce-orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': csrf,
+          'X-Inertia': 'true',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({}),
+      })
+
+      if (res.ok) {
+        // Try to parse the redirect flash message from Inertia response
+        try {
+          const json = await res.json()
+          const msg: string = json?.props?.flash?.success ?? json?.props?.flash?.message ?? ''
+          const match = msg.match(/(\d+) new/)
+          if (match) totalNew += parseInt(match[1])
+        } catch {
+          // Ignore parse errors — count is a bonus
+        }
+      } else {
+        errors.push(`${w.name}: HTTP ${res.status}`)
+      }
+    } catch (e: any) {
+      errors.push(`${w.name}: ${e?.message ?? 'network error'}`)
     }
-  )
+  }
+
+  isSyncing.value = false
+  syncProgress.value = ''
+
+  // Reload the orders list once after all syncs are done
+  router.reload({ only: ['orders'] })
+
+  if (errors.length === 0) {
+    toast.success(
+      totalNew > 0
+        ? `All websites synced — ${totalNew} new order(s) found.`
+        : 'All websites synced — already up to date.'
+    )
+  } else {
+    toast.error(`Synced with errors: ${errors.slice(0, 3).join(', ')}`)
+  }
 }
 
 function goToPage(url: string | null) {
@@ -227,7 +296,7 @@ function formatDate(dateString: string | null) {
           @click="syncOrdersFromWooCommerce"
         >
           <RefreshCw v-if="isSyncing" class="mr-2 h-4 w-4 animate-spin" />
-          {{ isSyncing ? 'Syncing...' : 'Sync from WooCommerce' }}
+          {{ syncProgress || (isSyncing ? 'Syncing...' : 'Sync from WooCommerce') }}
         </Button>
       </div>
 

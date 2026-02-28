@@ -3,15 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Website;
-use App\Models\WcOrder;
 use App\Jobs\SyncFluentSubmissions;
+use App\Services\WooCommerceOrderSyncService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class WebsiteController extends Controller
 {
+    public function __construct(private WooCommerceOrderSyncService $syncService) {}
     public function index()
     {
         $user = auth()->user();
@@ -270,45 +271,40 @@ class WebsiteController extends Controller
     public function syncWooCommerceOrders(Request $request, Website $website)
     {
         $this->authorize('view', $website);
-        
-        abort_if($website->status !== 'active', 403, 'Website is not active');
+
+        abort_if($website->status !== 'active', 403, 'Website is not active.');
 
         $request->validate([
             'per_page' => 'nullable|integer|min:1|max:100',
         ]);
 
         $perPage = (int) ($request->input('per_page', 50));
-
-        $result = $this->syncOrdersForWebsite($website, $perPage);
+        $result  = $this->syncService->syncForWebsite($website, $perPage);
 
         return back()->with($result['status'], $result['message']);
     }
 
     public function syncAllWooCommerceOrders(Request $request)
     {
-        $user = auth()->user();
-
+        $user     = auth()->user();
         $websites = Website::where('status', 'active')
-            ->when(!$user->is_admin, fn ($q) => $q->where('user_id', $user->id))
+            ->when(! $user->is_admin, fn ($q) => $q->where('user_id', $user->id))
             ->get();
-        
+
         if ($websites->isEmpty()) {
             return back()->with('error', 'No active websites found.');
         }
 
-        $totalSynced = 0;
+        $totalSynced       = 0;
         $processedWebsites = 0;
-        $failedWebsites = 0;
-        $messages = [];
+        $failedWebsites    = 0;
+        $messages          = [];
 
         foreach ($websites as $website) {
-            $result = $this->syncOrdersForWebsite($website, 20); // Default per page for bulk sync
-            
+            $result = $this->syncService->syncForWebsite($website, 20);
+
             if ($result['status'] === 'success') {
-                // Extract number from message "Synced X WooCommerce orders."
-                if (preg_match('/Synced (\d+) WooCommerce orders/', $result['message'], $matches)) {
-                    $totalSynced += (int)$matches[1];
-                }
+                $totalSynced += $result['synced'];
                 $processedWebsites++;
             } else {
                 $failedWebsites++;
@@ -317,106 +313,16 @@ class WebsiteController extends Controller
         }
 
         if ($failedWebsites === 0) {
-            return back()->with('success', "Synced total {$totalSynced} orders from {$processedWebsites} websites.");
-        } else {
-            $errorMsg = "Synced {$totalSynced} orders from {$processedWebsites} websites. Failed: {$failedWebsites}. " . implode(' ', array_slice($messages, 0, 3));
-            return back()->with('warning', $errorMsg);
+            $msg = $totalSynced > 0
+                ? "Synced {$totalSynced} new order(s) from {$processedWebsites} website(s)."
+                : 'All websites already up to date.';
+            return back()->with('success', $msg);
         }
+
+        $errorMsg = "Synced {$totalSynced} order(s) from {$processedWebsites} website(s). {$failedWebsites} failed. " . implode(' ', array_slice($messages, 0, 3));
+        return back()->with('warning', $errorMsg);
     }
 
-    private function syncOrdersForWebsite(Website $website, int $perPage = 50): array
-    {
-        if (! $website->wc_consumer_key || ! $website->wc_consumer_secret) {
-            return ['status' => 'error', 'message' => 'WooCommerce API credentials are missing.'];
-        }
-
-        $baseUrl = rtrim($website->base_url, '/');
-        $endpoint = "{$baseUrl}/wp-json/wc/v3/orders";
-
-        try {
-            $allOrders = [];
-            $page = 1;
-            $totalPages = 1;
-
-            // Fetch all pages of orders
-            do {
-                $response = Http::timeout(20)
-                    ->withBasicAuth($website->wc_consumer_key, $website->wc_consumer_secret)
-                    ->acceptJson()
-                    ->get($endpoint, [
-                        'per_page' => $perPage,
-                        'page'     => $page,
-                        'orderby'  => 'date',
-                        'order'    => 'desc',
-                    ]);
-
-                if (! $response->successful()) {
-                    $status = $response->status();
-                    $message = data_get($response->json(), 'message') ?? $response->body();
-                    return ['status' => 'error', 'message' => "WooCommerce sync failed (HTTP {$status}). {$message}"];
-                }
-
-                $orders = $response->json();
-                if (! is_array($orders)) {
-                    return ['status' => 'error', 'message' => 'WooCommerce sync failed: unexpected response format.'];
-                }
-
-                // Merge orders from this page
-                $allOrders = array_merge($allOrders, $orders);
-
-                // Get total pages from response headers (WooCommerce provides X-WP-TotalPages)
-                $totalPages = (int) $response->header('X-WP-TotalPages', 1);
-
-                $page++;
-            } while ($page <= $totalPages && count($orders) > 0);
-
-            $synced = 0;
-
-            foreach ($allOrders as $order) {
-                $wpOrderId = data_get($order, 'id');
-                if (! $wpOrderId) {
-                    continue;
-                }
-
-                // Extract payment status (same logic as ProcessWooWebhookEvent)
-                $paymentStatus = null;
-                if (isset($order['payment_status'])) {
-                    $paymentStatus = $order['payment_status'];
-                } elseif (!empty(data_get($order, 'date_paid'))) {
-                    $paymentStatus = 'paid';
-                }
-
-                WcOrder::updateOrCreate(
-                    [
-                        'website_id' => $website->id,
-                        'wp_order_id' => $wpOrderId,
-                    ],
-                    [
-                        'status' => data_get($order, 'status', 'unknown'),
-                        'payment_status' => $paymentStatus,
-                        'currency' => data_get($order, 'currency'),
-                        'total' => (string) data_get($order, 'total', '0'),
-                        'customer_email' => data_get($order, 'billing.email'),
-                        'customer_name' => trim(
-                            (data_get($order, 'billing.first_name') ?? '') . ' ' .
-                            (data_get($order, 'billing.last_name') ?? '')
-                        ),
-                        'created_at_wp' => data_get($order, 'date_created_gmt'),
-                        'updated_at_wp' => data_get($order, 'date_modified_gmt'),
-                        'payload' => $order,
-                    ]
-                );
-
-                $synced++;
-            }
-
-            $website->update(['last_sync_at' => now()]);
-
-            return ['status' => 'success', 'message' => "Synced {$synced} WooCommerce orders."];
-        } catch (\Throwable $e) {
-            return ['status' => 'error', 'message' => 'WooCommerce sync failed: ' . $e->getMessage()];
-        }
-    }
 
     /**
      * Reveal webhook secrets (requires password confirmation)
