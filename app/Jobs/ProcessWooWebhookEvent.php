@@ -22,119 +22,134 @@ class ProcessWooWebhookEvent implements ShouldQueue
 
     public function handle(): void
     {
-        $event   = WebhookEvent::findOrFail($this->webhookEventId);
-        $payload = $event->payload;
+        try {
+            $event   = WebhookEvent::findOrFail($this->webhookEventId);
+            $payload = $event->payload;
 
-        Log::info('WooWebhook raw payload', ['payload' => $payload]);
-        // Resolve order ID — try payload first, fall back to stored external_id
-        $orderId = $payload['id'] ?? $event->external_id ?? null;
+            // Resolve order ID — try multiple fields WooCommerce may use
+            $orderId = $payload['id']
+                ?? $payload['order_id']
+                ?? $payload['post_id']
+                ?? $event->external_id
+                ?? null;
 
-        if (!$orderId) {
-            Log::error('Missing order ID in webhook payload — marking as failed', [
+            if (!$orderId) {
+                Log::error('Missing order ID in webhook payload — marking as failed', [
+                    'webhook_event_id' => $this->webhookEventId,
+                    'topic'            => $event->topic,
+                    'payload_keys'     => array_keys($payload ?? []),
+                    'full_payload'     => $payload,
+                ]);
+                $event->update(['status' => 'failed', 'error_message' => 'Missing order ID in webhook payload']);
+                return;
+            }
+
+            // Determine payment status
+            $paymentStatus = $this->extractPaymentStatus($payload);
+
+            // Check if order already exists BEFORE creating/updating
+            $existingOrder = WcOrder::where('website_id', $event->website_id)
+                ->where('wp_order_id', $orderId)
+                ->first();
+
+            // Determine if this is a new order
+            $topic          = strtolower(trim($event->topic ?? ''));
+            $isOrderCreated = str_contains($topic, 'order.created')
+                || str_contains($topic, 'order_created')
+                || str_contains($topic, 'new_order');
+
+            $isNewOrder = $isOrderCreated;
+
+            Log::info('Processing WooCommerce webhook', [
                 'webhook_event_id' => $this->webhookEventId,
+                'order_id'         => $orderId,
                 'topic'            => $event->topic,
-                'payload_keys'     => array_keys($payload ?? []),
-                'full_payload'     => $payload,
+                'existing_order'   => $existingOrder?->id,
+                'is_new_order'     => $isNewOrder,
             ]);
-            $event->update(['status' => 'failed', 'error_message' => 'Missing order ID in webhook payload']);
-            return; // Soft fail — don't throw so the job doesn't keep retrying
-        }
 
-        // Determine payment status
-        $paymentStatus = $this->extractPaymentStatus($payload);
-
-        // Check if order already exists BEFORE creating/updating
-        $existingOrder = WcOrder::where('website_id', $event->website_id)
-            ->where('wp_order_id', $orderId)
-            ->first();
-
-        // Determine if this is a new order:
-        // WooCommerce sends topic as "order.created" in X-WC-Webhook-Topic header
-        $topic          = strtolower(trim($event->topic ?? ''));
-        $isOrderCreated = str_contains($topic, 'order.created')
-            || str_contains($topic, 'order_created')
-            || str_contains($topic, 'new_order');
-
-        // Notify on order.created even if the order was pre-synced manually
-        // (existingOrder only prevents duplicate notifications on order.updated webhooks)
-        $isNewOrder = $isOrderCreated;
-
-        Log::info('Processing WooCommerce webhook', [
-            'webhook_event_id' => $this->webhookEventId,
-            'order_id'         => $orderId,
-            'topic'            => $event->topic,
-            'existing_order'   => $existingOrder?->id,
-            'is_new_order'     => $isNewOrder,
-        ]);
-
-        // Upsert Woo order - handles both order.created and order.updated
-        // Uses updateOrCreate to ensure idempotency (no duplicates)
-        $order = WcOrder::updateOrCreate(
-            [
-                'website_id'  => $event->website_id,
-                'wp_order_id' => $orderId,
-            ],
-            [
-                'status' => $payload['status'] ?? 'unknown',
-                'payment_status' => $paymentStatus,
-                'currency' => $payload['currency'] ?? null,
-                'total' => $payload['total'] ?? 0,
-                'customer_email' => data_get($payload, 'billing.email'),
-                'customer_name' =>
-                    trim(
+            // Upsert Woo order — handles both order.created and order.updated
+            $order = WcOrder::updateOrCreate(
+                [
+                    'website_id'  => $event->website_id,
+                    'wp_order_id' => $orderId,
+                ],
+                [
+                    'status'         => $payload['status'] ?? 'unknown',
+                    'payment_status' => $paymentStatus,
+                    'currency'       => $payload['currency'] ?? null,
+                    'total'          => $payload['total'] ?? 0,
+                    'customer_email' => data_get($payload, 'billing.email'),
+                    'customer_name'  => trim(
                         (data_get($payload, 'billing.first_name') ?? '') . ' ' .
                         (data_get($payload, 'billing.last_name') ?? '')
                     ),
-                'created_at_wp' => data_get($payload, 'date_created_gmt'),
-                'updated_at_wp' => data_get($payload, 'date_modified_gmt'),
-                'payload' => $payload,
-            ]
-        );
+                    'created_at_wp'  => data_get($payload, 'date_created_gmt'),
+                    'updated_at_wp'  => data_get($payload, 'date_modified_gmt'),
+                    'payload'        => $payload,
+                ]
+            );
 
-        // Notify all admin users if this is a new order
-        if ($isNewOrder) {
-            $adminUsers = User::where('is_admin', true)->get();
-            
-            Log::info('Sending notifications for new order', [
-                'order_id' => $order->id,
-                'admin_users_count' => $adminUsers->count(),
-            ]);
-            
-            if ($adminUsers->isEmpty()) {
-                Log::warning('No admin users found to notify', [
-                    'order_id' => $order->id,
+            // Notify all admin users if this is a new order
+            if ($isNewOrder) {
+                $adminUsers = User::where('is_admin', true)->get();
+
+                Log::info('Sending notifications for new order', [
+                    'order_id'          => $order->id,
+                    'admin_users_count' => $adminUsers->count(),
+                ]);
+
+                if ($adminUsers->isEmpty()) {
+                    Log::warning('No admin users found to notify', ['order_id' => $order->id]);
+                }
+
+                foreach ($adminUsers as $user) {
+                    try {
+                        $user->notify(new NewOrderNotification($order));
+                        Log::info('Notification sent successfully', [
+                            'user_id'  => $user->id,
+                            'order_id' => $order->id,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to send notification to user', [
+                            'user_id'  => $user->id,
+                            'order_id' => $order->id,
+                            'error'    => $e->getMessage(),
+                        ]);
+                    }
+                }
+            } else {
+                Log::info('Skipping notification - not a new order', [
+                    'order_id'       => $orderId,
+                    'existing_order' => $existingOrder?->id,
+                    'topic'          => $event->topic,
                 ]);
             }
-            
-            foreach ($adminUsers as $user) {
-                try {
-                    $user->notify(new NewOrderNotification($order));
-                    Log::info('Notification sent successfully', [
-                        'user_id' => $user->id,
-                        'order_id' => $order->id,
-                    ]);
-                } catch (\Exception $e) {
-                    // Log error but don't fail the job
-                    Log::error('Failed to send notification to user', [
-                        'user_id' => $user->id,
-                        'order_id' => $order->id,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
-                }
-            }
-        } else {
-            Log::info('Skipping notification - not a new order', [
-                'order_id'       => $orderId,
-                'existing_order' => $existingOrder?->id,
-                'topic'          => $event->topic,
-            ]);
-        }
 
-        $event->update([
-            'status' => 'processed',
-            'processed_at' => now(),
-        ]);
+            $event->update([
+                'status'       => 'processed',
+                'processed_at' => now(),
+            ]);
+
+        } catch (\Throwable $e) {
+            // Catches ALL exceptions including when QUEUE_CONNECTION=sync
+            // (where the framework's failed() callback is never invoked)
+            Log::error('ProcessWooWebhookEvent crashed', [
+                'webhook_event_id' => $this->webhookEventId,
+                'error'            => $e->getMessage(),
+                'file'             => $e->getFile() . ':' . $e->getLine(),
+            ]);
+
+            WebhookEvent::where('id', $this->webhookEventId)->update([
+                'status'        => 'failed',
+                'error_message' => $e->getMessage(),
+            ]);
+
+            // Re-throw so the HTTP response to WooCommerce is still a 200 OK
+            // (the webhook controller already returned 200 before dispatching)
+            // But if running under a real queue worker, this allows retries.
+            throw $e;
+        }
     }
 
     /**
