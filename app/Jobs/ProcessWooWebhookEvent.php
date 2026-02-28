@@ -25,6 +25,7 @@ class ProcessWooWebhookEvent implements ShouldQueue
         $event   = WebhookEvent::findOrFail($this->webhookEventId);
         $payload = $event->payload;
 
+        Log::info('WooWebhook raw payload', ['payload' => $payload]);
         // Resolve order ID — try payload first, fall back to stored external_id
         $orderId = $payload['id'] ?? $event->external_id ?? null;
 
@@ -33,6 +34,7 @@ class ProcessWooWebhookEvent implements ShouldQueue
                 'webhook_event_id' => $this->webhookEventId,
                 'topic'            => $event->topic,
                 'payload_keys'     => array_keys($payload ?? []),
+                'full_payload'     => $payload,
             ]);
             $event->update(['status' => 'failed', 'error_message' => 'Missing order ID in webhook payload']);
             return; // Soft fail — don't throw so the job doesn't keep retrying
