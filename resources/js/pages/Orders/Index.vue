@@ -48,6 +48,27 @@ const onOrderNotification = (data: any) => {
     toast.success('New order received!')
   }
 }
+
+// --- Polling fallback (60s) in case Pusher / Echo is unavailable ---
+let pollingTimer: ReturnType<typeof setInterval> | null = null
+
+function startPolling() {
+  stopPolling()
+  pollingTimer = setInterval(() => {
+    // Only silently poll when on page 1 (avoids disrupting mid-pagination)
+    if (!document.hidden && props.orders?.current_page === 1) {
+      router.reload({ only: ['orders'] })
+    }
+  }, 60_000)
+}
+
+function stopPolling() {
+  if (pollingTimer !== null) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
+  }
+}
+
 onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
@@ -56,9 +77,11 @@ onMounted(() => {
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
+  startPolling()
 })
 onUnmounted(() => {
   offNotification('orders-index')
+  stopPolling()
 })
 
 function syncOrdersFromWooCommerce() {
