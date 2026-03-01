@@ -24,6 +24,7 @@ function dispatch(data: any) {
 }
 
 function ensureSubscribed(uid: number) {
+  if (!uid || !Number.isFinite(uid)) return
   if (channel && userId === uid) return   // already subscribed for this user
 
   // Clean up stale subscription if user changed

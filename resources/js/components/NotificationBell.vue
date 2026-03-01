@@ -216,9 +216,12 @@ onMounted(() => {
     
     // Subscribe to shared Echo channel for real-time notifications
     try {
-        onNotification('bell', (data: any) => {
-            handleRealTimeNotification(data);
-        }, user.id);
+        const uid = Number((user as any).id);
+        if (uid && Number.isFinite(uid)) {
+            onNotification('bell', (data: any) => {
+                handleRealTimeNotification(data);
+            }, uid);
+        }
     } catch (error) {
         console.error('Failed to setup real-time notifications:', error);
     }
