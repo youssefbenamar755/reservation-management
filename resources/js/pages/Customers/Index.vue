@@ -185,14 +185,23 @@ function goToPage(url: string | null) {
 }
 
 /**
- * Safely decode HTML entities without rendering HTML tags
- * This prevents XSS while still allowing entities like &laquo; and &raquo; to display correctly
+ * Safely decode HTML entities without rendering HTML tags.
+ * SSR-safe: uses DOM when available, otherwise pure JS decode for Laravel pagination entities.
  */
 function decodeHtmlEntities(text: string): string {
   if (!text) return ''
-  const textarea = document.createElement('textarea')
-  textarea.innerHTML = text
-  return textarea.value
+  if (typeof document !== 'undefined') {
+    const textarea = document.createElement('textarea')
+    textarea.innerHTML = text
+    return textarea.value
+  }
+  return text
+    .replace(/&laquo;/g, '\u00AB')
+    .replace(/&raquo;/g, '\u00BB')
+    .replace(/&lsaquo;/g, '\u2039')
+    .replace(/&rsaquo;/g, '\u203A')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
 }
 
 const customerEmail = (email: string) => encodeURIComponent(email)

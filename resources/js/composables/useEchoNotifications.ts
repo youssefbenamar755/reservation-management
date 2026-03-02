@@ -3,6 +3,7 @@
  *
  * Ensures there is exactly ONE Echo private channel subscription per user.
  * Other components can register callbacks instead of creating duplicate subscriptions.
+ * Waits for Echo to be initialized (getEcho) before subscribing.
  *
  * Usage:
  *   const { onNotification, offNotification } = useEchoNotifications()
@@ -10,12 +11,13 @@
  *   onUnmounted(() => offNotification('orders'))
  */
 
-import Echo from '@/lib/echo'
+import { getEcho } from '@/lib/echo'
 
 type Handler = (data: any) => void
 
 // Module-level state — shared across all component instances
 let channel: any = null
+let echoInstance: any = null
 let userId: number | null = null
 const handlers = new Map<string, Handler>()
 
@@ -27,16 +29,22 @@ function ensureSubscribed(uid: number) {
   if (channel && userId === uid) return   // already subscribed for this user
 
   // Clean up stale subscription if user changed
-  if (channel) {
-    try { Echo.leave(`App.Models.User.${userId}`) } catch {}
+  if (channel && echoInstance) {
+    try {
+      echoInstance.leave(`App.Models.User.${userId}`)
+    } catch {}
     channel = null
   }
 
   userId = uid
-  channel = Echo.private(`App.Models.User.${uid}`)
-  channel.listen('.notification', (data: any) => {
-    dispatch(data)
-  })
+  getEcho().then((instance) => {
+    if (!instance) return
+    echoInstance = instance
+    channel = instance.private(`App.Models.User.${uid}`)
+    channel.listen('.notification', (data: any) => {
+      dispatch(data)
+    })
+  }).catch(() => {})
 }
 
 export function useEchoNotifications() {

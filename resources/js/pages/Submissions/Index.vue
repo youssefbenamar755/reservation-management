@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DownloadCloud, ChevronLeft, ChevronRight, Trash2 } from 'lucide-vue-next'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
-import Echo from '@/lib/echo'
+import { getEcho } from '@/lib/echo'
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,8 @@ const page = usePage()
 
 // Real-time: auto-reload the submissions table when a new form submission arrives
 let echoChannel: any = null
+let echoInstance: any = null
+let subscribedChannelName: string | null = null
 const onSubmissionNotification = (data: any) => {
   if (data?.type === 'form_submission') {
     router.reload({ only: ['forms'] })
@@ -56,16 +58,27 @@ const onSubmissionNotification = (data: any) => {
 onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
-  try {
-    echoChannel = Echo.private(`App.Models.User.${user.id}`)
-    echoChannel.listen('.notification', onSubmissionNotification)
-  } catch (e) {
-    console.error('Echo setup failed:', e)
-  }
+  const name = `App.Models.User.${user.id}`
+  getEcho()
+    .then((instance) => {
+      if (!instance) return
+      echoInstance = instance
+      subscribedChannelName = name
+      echoChannel = instance.private(name)
+      echoChannel.listen('.notification', onSubmissionNotification)
+    })
+    .catch((e) => console.error('Echo setup failed:', e))
 })
 onUnmounted(() => {
   if (echoChannel) {
-    try { echoChannel.stopListening('.notification', onSubmissionNotification) } catch {}
+    try {
+      echoChannel.stopListening('.notification', onSubmissionNotification)
+    } catch {}
+  }
+  if (echoInstance && subscribedChannelName) {
+    try {
+      echoInstance.leave(subscribedChannelName)
+    } catch {}
   }
 })
 
