@@ -2,10 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Events\NewWcOrderReceived;
 use App\Models\WebhookEvent;
 use App\Models\WcOrder;
 use App\Models\User;
 use App\Notifications\NewOrderNotification;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -91,8 +93,10 @@ class ProcessWooWebhookEvent implements ShouldQueue
             ]
         );
 
-        // Notify all admin users if this is a new order
+        // Notify all admin users and broadcast for Orders page if this is a new order
         if ($isNewOrder) {
+            Event::dispatch(new NewWcOrderReceived($order));
+
             $adminUsers = User::where('is_admin', true)->get();
             
             Log::info('Sending notifications for new order', [

@@ -61,8 +61,9 @@ function getWebhookUrl(
   type: 'woocommerce' | 'fluentforms'
 ): string {
   if (website.webhooks?.[type]) return website.webhooks[type]!
-  const baseUrl = window.location.origin
-  return `${baseUrl}/api/v1/webhooks/${type}/${website.slug}`
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const path = `/api/v1/webhooks/${type}/${website.slug}`
+  return baseUrl ? `${baseUrl}${path}` : path
 }
 
 async function copyToClipboard(text: string, websiteId: number) {

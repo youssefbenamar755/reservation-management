@@ -10,6 +10,7 @@ import { edit as editPassword } from '@/routes/user-password';
 import { index as usersIndex } from '@/routes/users';
 import { type NavItem } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 
 const page = usePage();
 const user = page.props.auth.user;
@@ -44,7 +45,7 @@ const sidebarNavItems: NavItem[] = [
     ] : []),
 ];
 
-const currentPath = typeof window !== undefined ? window.location.pathname : '';
+const currentPath = computed(() => page.url || '');
 </script>
 
 <template>

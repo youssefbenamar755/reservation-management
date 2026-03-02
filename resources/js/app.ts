@@ -6,7 +6,7 @@ import type { DefineComponent } from 'vue';
 import { createApp, h } from 'vue';
 import { initializeTheme } from './composables/useAppearance';
 import Toaster from './components/Toaster.vue';
-import './lib/echo';
+import { getEcho } from './lib/echo';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -30,3 +30,8 @@ createInertiaApp({
 
 // This will set light / dark mode on page load...
 initializeTheme();
+
+// Initialize Laravel Echo only in the browser (SSR-safe).
+if (typeof window !== 'undefined') {
+    void getEcho();
+}
