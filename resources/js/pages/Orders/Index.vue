@@ -9,6 +9,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
 import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import { useToast } from '@/composables/useToast'
+import { getEcho } from '@/lib/echo'
 
 const props = defineProps<{
   orders: any
@@ -50,6 +51,10 @@ const onOrderNotification = (data: any) => {
   }
 }
 
+const onOrderReceived = () => {
+  router.reload({ only: ['orders'] })
+}
+
 // --- Polling fallback (60s) in case Pusher / Echo is unavailable ---
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
@@ -74,6 +79,14 @@ onMounted(() => {
   if (!user) return
   try {
     onNotification('orders-index', onOrderNotification, user.id)
+    getEcho()
+      .then((echo) => {
+        if (!echo) return
+        echo
+          .private('orders')
+          .listen('.order.received', onOrderReceived)
+      })
+      .catch(() => {})
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
@@ -81,6 +94,12 @@ onMounted(() => {
 })
 onUnmounted(() => {
   offNotification('orders-index')
+  getEcho()
+    .then((echo) => {
+      if (!echo) return
+      echo.leave('orders')
+    })
+    .catch(() => {})
   stopPolling()
 })
 
@@ -196,7 +215,7 @@ function goToPage(url: string | null) {
       preserveScroll: true,
       replace: false,
     })
-  } catch (e) {
+  } catch {
     // Fallback: use router.visit if URL parsing fails
     router.visit(url, { preserveState: true, preserveScroll: true })
   }

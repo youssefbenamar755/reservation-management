@@ -98,19 +98,24 @@ class ProcessWooWebhookEvent implements ShouldQueue
             Event::dispatch(new NewWcOrderReceived($order));
 
             $adminUsers = User::where('is_admin', true)->get();
+            $websiteOwner = $event->website?->user;
+            $usersToNotify = $adminUsers
+                ->when($websiteOwner, fn ($collection) => $collection->push($websiteOwner))
+                ->unique('id')
+                ->values();
             
             Log::info('Sending notifications for new order', [
                 'order_id' => $order->id,
-                'admin_users_count' => $adminUsers->count(),
+                'users_to_notify_count' => $usersToNotify->count(),
             ]);
             
-            if ($adminUsers->isEmpty()) {
-                Log::warning('No admin users found to notify', [
+            if ($usersToNotify->isEmpty()) {
+                Log::warning('No users found to notify', [
                     'order_id' => $order->id,
                 ]);
             }
             
-            foreach ($adminUsers as $user) {
+            foreach ($usersToNotify as $user) {
                 try {
                     $user->notify(new NewOrderNotification($order));
                     Log::info('Notification sent successfully', [
