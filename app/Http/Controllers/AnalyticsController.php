@@ -310,7 +310,7 @@ class AnalyticsController extends Controller
         ];
     }
 
-    private function extractPayPalFee(array $payload): float
+    private function extractPaypalFee(array $payload): float
     {
         foreach ($payload['meta_data'] ?? [] as $meta) {
             if (($meta['key'] ?? null) !== '_ppcp_paypal_fees') {
@@ -322,11 +322,6 @@ class AnalyticsController extends Controller
         }
 
         return 0;
-    }
-
-    private function extractPaypalFee(array $payload): float
-    {
-        return $this->extractPayPalFee($payload);
     }
 
     private function extractCountryFromPayload(array $payload): ?string
