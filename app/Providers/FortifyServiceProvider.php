@@ -100,6 +100,10 @@ class FortifyServiceProvider extends ServiceProvider
         });
 
         // Sync operations rate limiting (WooCommerce/Fluent Forms)
+        RateLimiter::for('sync-pages', function (Request $request) {
+            return Limit::perMinute(60)->by($request->user()->id ?? $request->ip());
+        });
+
         RateLimiter::for('sync', function (Request $request) {
             return Limit::perMinute(3)->by($request->user()->id ?? $request->ip())
                 ->response(function () {

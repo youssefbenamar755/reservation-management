@@ -6,6 +6,7 @@ use App\Models\WcOrder;
 use App\Models\Website;
 use App\Models\FfSubmission;
 use App\Services\AmadeusDummyTicketGeneratorService;
+use App\Services\WooCommerceOrderStore;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -152,7 +153,7 @@ class WcOrderController extends Controller
         ]);
     }
 
-    public function update(Request $request, WcOrder $order)
+    public function update(Request $request, WcOrder $order, WooCommerceOrderStore $orders)
     {
         $this->authorize('update', $order);
         
@@ -199,14 +200,17 @@ class WcOrderController extends Controller
                     return back()->with('error', "Order status updated locally, but WooCommerce update failed (HTTP {$status}). {$message}");
                 }
 
-                // Update local database with the response from WooCommerce
+                // Use the same timestamp guard as sync and webhooks. A newer
+                // webhook may arrive while the WooCommerce request is in flight.
                 $wooOrder = $response->json();
                 if (is_array($wooOrder)) {
-                    $order->update([
-                        'status' => data_get($wooOrder, 'status', $request->status),
-                        'updated_at_wp' => data_get($wooOrder, 'date_modified_gmt'),
-                        'payload' => $wooOrder, // Update payload with latest data from WooCommerce
-                    ]);
+                    $wooOrder['id'] ??= $order->wp_order_id;
+                    $wooOrder['status'] ??= $request->status;
+                    $result = $orders->store($website->id, $wooOrder);
+
+                    if ($result['order']->status !== $wooOrder['status']) {
+                        return back()->with('success', 'WooCommerce accepted the status update. A newer order update was retained locally.');
+                    }
                 } else {
                     // Fallback: just update status
                     $order->update([

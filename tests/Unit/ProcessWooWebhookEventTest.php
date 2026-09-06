@@ -1,9 +1,9 @@
 <?php
 
 use App\Jobs\ProcessWooWebhookEvent;
-use App\Models\Website;
 use App\Models\WcOrder;
 use App\Models\WebhookEvent;
+use App\Models\Website;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -11,8 +11,9 @@ uses(TestCase::class, RefreshDatabase::class);
 
 test('processes order.updated webhook and updates order status', function () {
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test WooCommerce Site',
-        'slug' => 'test-woo-site-' . uniqid(),
+        'slug' => 'test-woo-site-'.uniqid(),
         'base_url' => 'https://test-woo.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -66,7 +67,7 @@ test('processes order.updated webhook and updates order status', function () {
 
     // Process the event
     $job = new ProcessWooWebhookEvent($event->id);
-    $job->handle();
+    app()->call([$job, 'handle']);
 
     // Refresh the event to get updated status
     $event->refresh();
@@ -92,8 +93,9 @@ test('processes order.updated webhook and updates order status', function () {
 
 test('processes order.updated webhook and updates payment status to null when unpaid', function () {
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test WooCommerce Site 2',
-        'slug' => 'test-woo-site-2-' . uniqid(),
+        'slug' => 'test-woo-site-2-'.uniqid(),
         'base_url' => 'https://test-woo2.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -142,7 +144,7 @@ test('processes order.updated webhook and updates payment status to null when un
 
     // Process the event
     $job = new ProcessWooWebhookEvent($event->id);
-    $job->handle();
+    app()->call([$job, 'handle']);
 
     // Assert order was updated
     $order = WcOrder::where('website_id', $website->id)
@@ -156,8 +158,9 @@ test('processes order.updated webhook and updates payment status to null when un
 
 test('processes order.created webhook and creates new order', function () {
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test WooCommerce Site 3',
-        'slug' => 'test-woo-site-3-' . uniqid(),
+        'slug' => 'test-woo-site-3-'.uniqid(),
         'base_url' => 'https://test-woo3.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -193,7 +196,7 @@ test('processes order.created webhook and creates new order', function () {
 
     // Process the event
     $job = new ProcessWooWebhookEvent($event->id);
-    $job->handle();
+    app()->call([$job, 'handle']);
 
     // Assert order was created
     $order = WcOrder::where('website_id', $website->id)
@@ -209,8 +212,9 @@ test('processes order.created webhook and creates new order', function () {
 
 test('handles idempotency - receiving same webhook multiple times does not create duplicates', function () {
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test WooCommerce Site 4',
-        'slug' => 'test-woo-site-4-' . uniqid(),
+        'slug' => 'test-woo-site-4-'.uniqid(),
         'base_url' => 'https://test-woo4.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -246,7 +250,7 @@ test('handles idempotency - receiving same webhook multiple times does not creat
         ]);
 
         $job = new ProcessWooWebhookEvent($event->id);
-        $job->handle();
+        app()->call([$job, 'handle']);
     }
 
     // Assert only one order exists (no duplicates)
@@ -261,8 +265,9 @@ test('handles idempotency - receiving same webhook multiple times does not creat
 
 test('extracts payment_status from payment_status field when available', function () {
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test WooCommerce Site 5',
-        'slug' => 'test-woo-site-5-' . uniqid(),
+        'slug' => 'test-woo-site-5-'.uniqid(),
         'base_url' => 'https://test-woo5.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -298,7 +303,7 @@ test('extracts payment_status from payment_status field when available', functio
     ]);
 
     $job = new ProcessWooWebhookEvent($event->id);
-    $job->handle();
+    app()->call([$job, 'handle']);
 
     $order = WcOrder::where('website_id', $website->id)
         ->where('wp_order_id', 12349)
@@ -307,4 +312,3 @@ test('extracts payment_status from payment_status field when available', functio
     expect($order)->not->toBeNull();
     expect($order->payment_status)->toBe('partial'); // Uses payment_status field directly
 });
-

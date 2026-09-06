@@ -48,3 +48,6 @@ jobs:
 
       - name: Tests
         run: ./vendor/bin/pest
+
+      - name: Frontend regression tests
+        run: npm run test:frontend

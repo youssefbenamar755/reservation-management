@@ -7,7 +7,6 @@ use App\Models\WcOrder;
 use App\Models\FfSubmission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 use Carbon\Carbon;
@@ -15,31 +14,19 @@ use Carbon\Carbon;
 class AnalyticsController extends Controller
 {
     /**
-     * Get country from IP address using ipinfo.io
+     * Reuse existing country enrichment without making page requests wait on an API.
      */
     private function getCountryFromIp(string $ip): ?string
     {
-        // Skip local/private IPs
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
             return null;
         }
 
-        // Cache results for 24 hours to avoid API rate limits
-        return Cache::remember("ip_country_{$ip}", 86400, function () use ($ip) {
-            try {
-                $response = Http::timeout(3)->get("https://ipinfo.io/{$ip}/country");
-                
-                if ($response->successful()) {
-                    $countryCode = trim($response->body());
-                    // Return country code if valid (2-3 letters)
-                    return !empty($countryCode) && strlen($countryCode) <= 3 ? $countryCode : null;
-                }
-            } catch (\Exception $e) {
-                // Silently fail - return null if API is unavailable
-            }
-            
-            return null;
-        });
+        $country = Cache::get("ip_country_{$ip}");
+
+        return is_string($country) && preg_match('/^[A-Z]{2,3}$/i', trim($country))
+            ? strtoupper(trim($country))
+            : null;
     }
 
     /**
@@ -70,13 +57,17 @@ class AnalyticsController extends Controller
 
     public function index(Request $request)
     {
-        // Generate cache key based on filters
-        $cacheKey = $this->getCacheKey($request);
+        $user = $request->user();
+        $userWebsiteIds = Website::when(!$user->is_admin, fn ($query) => $query->where('user_id', $user->id))
+            ->orderBy('id')->pluck('id')->all();
+
+        // Include the current authorization scope, so a cached page cannot retain revoked access.
+        $cacheKey = $this->getCacheKey($request, $userWebsiteIds);
         
         // Cache expensive calculations for 5 minutes
         // Cache the data array, then render with Inertia
-        $data = Cache::remember($cacheKey, 300, function () use ($request) {
-            return $this->calculateAnalyticsData($request);
+        $data = Cache::remember($cacheKey, 300, function () use ($request, $userWebsiteIds) {
+            return $this->calculateAnalyticsData($request, $userWebsiteIds);
         });
         
         return Inertia::render('Analytics', $data);
@@ -85,30 +76,28 @@ class AnalyticsController extends Controller
     /**
      * Generate cache key from request filters
      */
-    private function getCacheKey(Request $request): string
+    private function getCacheKey(Request $request, array $userWebsiteIds): string
     {
         $filters = [
-            'user_id' => auth()->id(), // Include user ID in cache key
+            'user_id' => auth()->id(),
+            'is_admin' => (bool) $request->user()->is_admin,
+            'website_scope' => $userWebsiteIds,
+            'today' => now()->toDateString(),
             'start_date' => $request->input('start_date', 'default'),
             'end_date' => $request->input('end_date', 'default'),
             'website_ids' => $request->input('website_ids', []),
             'payment_status' => $request->input('payment_status', 'all'),
         ];
         
-        return 'analytics:' . md5(json_encode($filters));
+        return 'analytics:v2:' . md5(json_encode($filters));
     }
 
     /**
      * Calculate analytics data
      */
-    private function calculateAnalyticsData(Request $request): array
+    private function calculateAnalyticsData(Request $request, array $userWebsiteIds): array
     {
         $user = auth()->user();
-        
-        // Get user's website IDs for filtering
-        $userWebsiteIds = Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
-            ->pluck('id')
-            ->toArray();
         
         // Parse date range filters
         $startDate = $request->input('start_date') 
@@ -133,7 +122,7 @@ class AnalyticsController extends Controller
                     $q->whereIn('website_id', $websiteIds);
                 })
                 ->when($request->filled('payment_status'), function ($q) use ($request) {
-                    $q->where('status', $request->payment_status);
+                    $q->where('wc_orders.status', $request->payment_status);
                 });
         };
 
@@ -404,6 +393,7 @@ class AnalyticsController extends Controller
         // Conversion Funnel: Form Submissions → Orders Created → Paid Orders
         $baseSubmissionQuery = FfSubmission::query()
             ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->whereIn('website_id', $userWebsiteIds)
             ->when($request->filled('website_ids'), function ($query) use ($request) {
                 $websiteIds = is_array($request->website_ids) 
                     ? $request->website_ids 
@@ -427,9 +417,9 @@ class AnalyticsController extends Controller
             : 0;
 
         // Flight Analytics
-        $topDepartureAirports = $this->topDepartureAirports($request, $startDate, $endDate, $applyFilters);
-        $topArrivalAirports = $this->topArrivalAirports($request, $startDate, $endDate, $applyFilters);
-        $topRoutes = $this->topRoutes($request, $startDate, $endDate, $applyFilters);
+        $topDepartureAirports = $this->topDepartureAirports($request, $startDate, $endDate, $userWebsiteIds);
+        $topArrivalAirports = $this->topArrivalAirports($request, $startDate, $endDate, $userWebsiteIds);
+        $topRoutes = $this->topRoutes($request, $startDate, $endDate, $userWebsiteIds);
 
         return [
             'stats' => [
@@ -506,7 +496,7 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Extract country from order payload (with caching for IP lookups)
+     * Extract country from saved order data and existing enrichment cache
      */
     private function extractCountryFromPayload(array $payload): ?string
     {
@@ -517,7 +507,7 @@ class AnalyticsController extends Controller
             return $country;
         }
         
-        // If no country in billing, try to get from IP address (slower, but cached)
+        // Use only an already-cached IP country; never perform external HTTP during rendering
         $ip = $this->extractIpFromPayload($payload);
         if ($ip) {
             return $this->getCountryFromIp($ip);
@@ -754,13 +744,14 @@ class AnalyticsController extends Controller
     /**
      * Get top departure airports
      */
-    private function topDepartureAirports(Request $request, $startDate, $endDate, $applyFilters): array
+    private function topDepartureAirports(Request $request, $startDate, $endDate, array $userWebsiteIds): array
     {
         $departureCounts = [];
         
         // Process Fluent Form submissions
         $submissionQuery = FfSubmission::query()
             ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->whereIn('website_id', $userWebsiteIds)
             ->when($request->filled('website_ids'), function ($q) use ($request) {
                 $websiteIds = is_array($request->website_ids) 
                     ? $request->website_ids 
@@ -798,13 +789,14 @@ class AnalyticsController extends Controller
     /**
      * Get top arrival airports
      */
-    private function topArrivalAirports(Request $request, $startDate, $endDate, $applyFilters): array
+    private function topArrivalAirports(Request $request, $startDate, $endDate, array $userWebsiteIds): array
     {
         $arrivalCounts = [];
         
         // Process Fluent Form submissions
         $submissionQuery = FfSubmission::query()
             ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->whereIn('website_id', $userWebsiteIds)
             ->when($request->filled('website_ids'), function ($q) use ($request) {
                 $websiteIds = is_array($request->website_ids) 
                     ? $request->website_ids 
@@ -842,13 +834,14 @@ class AnalyticsController extends Controller
     /**
      * Get top routes (FROM → TO)
      */
-    private function topRoutes(Request $request, $startDate, $endDate, $applyFilters): array
+    private function topRoutes(Request $request, $startDate, $endDate, array $userWebsiteIds): array
     {
         $routeCounts = [];
         
         // Process Fluent Form submissions
         $submissionQuery = FfSubmission::query()
             ->whereBetween('created_at_wp', [$startDate, $endDate])
+            ->whereIn('website_id', $userWebsiteIds)
             ->when($request->filled('website_ids'), function ($q) use ($request) {
                 $websiteIds = is_array($request->website_ids) 
                     ? $request->website_ids 
@@ -884,4 +877,3 @@ class AnalyticsController extends Controller
             ->toArray();
     }
 }
-

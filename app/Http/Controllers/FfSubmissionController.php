@@ -203,6 +203,8 @@ class FfSubmissionController extends Controller
      */
     public function syncFormSchema(Website $website, int $formId, FluentFormSchemaService $schemaService, \App\Services\FluentFormSubmissionService $submissionService)
     {
+        $this->authorize('update', $website);
+
         set_time_limit(120); // Increase timeout to 2 minutes for this request
         try {
             // First, sync the form schema
@@ -244,6 +246,8 @@ class FfSubmissionController extends Controller
      */
     public function syncAllFormSchemas(Website $website, FluentFormSchemaService $service)
     {
+        $this->authorize('update', $website);
+
         set_time_limit(300); // Increase timeout to 5 minutes for bulk sync
         if (empty($website->ff_username) || empty($website->ff_app_password)) {
             return back()->with('error', 'Fluent Forms credentials not configured for this website.');

@@ -10,6 +10,7 @@ import { Link } from '@inertiajs/vue3'
 import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import { useToast } from '@/composables/useToast'
 import { getEcho } from '@/lib/echo'
+import { runWooCommerceSync, summarizeWooCommerceSyncResults, type WooCommerceSyncCounts } from '@/lib/wooCommerceSync'
 
 const props = defineProps<{
   orders: any
@@ -37,6 +38,7 @@ function updateFilter(key: string, value: string) {
 }
 
 const isSyncing = ref(false)
+let syncAbortController: AbortController | null = null
 const syncProgress = ref('') // e.g. "Syncing Website A (1 / 3)…"
 const selectedWebsiteId = computed(() => props.filters.website_id)
 const page = usePage()
@@ -93,6 +95,7 @@ onMounted(() => {
   startPolling()
 })
 onUnmounted(() => {
+  syncAbortController?.abort()
   offNotification('orders-index')
   getEcho()
     .then((echo) => {
@@ -104,30 +107,15 @@ onUnmounted(() => {
 })
 
 async function syncOrdersFromWooCommerce() {
+  if (isSyncing.value) return
   isSyncing.value = true
   syncProgress.value = ''
 
-  // ── Single website: fast Inertia POST (same as before) ───────────────────
-  if (selectedWebsiteId.value) {
-    router.post(
-      `/websites/${selectedWebsiteId.value}/sync-woocommerce-orders`,
-      {},
-      {
-        preserveScroll: true,
-        preserveState: true,
-        onFinish: () => {
-          isSyncing.value = false
-          syncProgress.value = ''
-        },
-      }
-    )
-    return
-  }
-
-  // ── All websites: sync each one independently to avoid timeout ───────────
-  // Each per-website request is short-lived; we chain them sequentially so
-  // the server never has to handle all of them in one blocking request.
-  const websites: { id: number; name: string }[] = props.websites
+  // Both modes request one page at a time; the server keeps the resume cursor.
+  const websiteId = selectedWebsiteId.value
+  const websites: { id: number; name: string }[] = websiteId
+    ? props.websites.filter((website) => String(website.id) === String(websiteId))
+    : props.websites
 
   if (!websites.length) {
     isSyncing.value = false
@@ -135,8 +123,10 @@ async function syncOrdersFromWooCommerce() {
     return
   }
 
-  let totalNew = 0
+  const syncResults: Array<WooCommerceSyncCounts | null> = []
   const errors: string[] = []
+  const controller = new AbortController()
+  syncAbortController = controller
 
   for (let i = 0; i < websites.length; i++) {
     const w = websites[i]
@@ -146,47 +136,43 @@ async function syncOrdersFromWooCommerce() {
       const csrfMeta = document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement | null
       const csrf = csrfMeta?.content ?? ''
 
-      const res = await fetch(`/websites/${w.id}/sync-woocommerce-orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': csrf,
-          'X-Inertia': 'true',
-          Accept: 'application/json',
+      const result = await runWooCommerceSync(
+        () => fetch(`/websites/${w.id}/sync-woocommerce-orders`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrf,
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({}),
+        }),
+        (counts) => {
+          syncProgress.value = `Syncing ${w.name} (${i + 1} / ${websites.length}) — ${counts.newOrders} new, ${counts.updatedOrders} updated…`
         },
-        body: JSON.stringify({}),
-      })
-
-      if (res.ok) {
-        // Try to parse the redirect flash message from Inertia response
-        try {
-          const json = await res.json()
-          const msg: string = json?.props?.flash?.success ?? json?.props?.flash?.message ?? ''
-          const match = msg.match(/(\d+) new/)
-          if (match) totalNew += parseInt(match[1])
-        } catch {
-          // Ignore parse errors — count is a bonus
-        }
-      } else {
-        errors.push(`${w.name}: HTTP ${res.status}`)
-      }
+        { signal: controller.signal },
+      )
+      syncResults.push(result)
     } catch (e: any) {
+      if (controller.signal.aborted) {
+        isSyncing.value = false
+        syncProgress.value = ''
+        syncAbortController = null
+        return
+      }
       errors.push(`${w.name}: ${e?.message ?? 'network error'}`)
     }
   }
 
   isSyncing.value = false
   syncProgress.value = ''
+  syncAbortController = null
 
   // Reload the orders list once after all syncs are done
   router.reload({ only: ['orders'] })
 
   if (errors.length === 0) {
-    toast.success(
-      totalNew > 0
-        ? `All websites synced — ${totalNew} new order(s) found.`
-        : 'All websites synced — already up to date.'
-    )
+    toast.success(summarizeWooCommerceSyncResults(syncResults, websiteId ? websites[0].name : 'All websites'))
   } else {
     toast.error(`Synced with errors: ${errors.slice(0, 3).join(', ')}`)
   }

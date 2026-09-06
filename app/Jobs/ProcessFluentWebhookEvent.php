@@ -2,17 +2,19 @@
 
 namespace App\Jobs;
 
-use App\Models\WebhookEvent;
 use App\Models\FfForm;
 use App\Models\FfSubmission;
 use App\Models\User;
+use App\Models\WebhookEvent;
 use App\Notifications\NewFormSubmissionNotification;
+use App\Support\FluentWebhookPayload;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 class ProcessFluentWebhookEvent implements ShouldQueue
@@ -24,23 +26,20 @@ class ProcessFluentWebhookEvent implements ShouldQueue
     public function handle(): void
     {
         $event = WebhookEvent::findOrFail($this->webhookEventId);
-        $payload = $event->payload;
-
-        // Normalize payload: if payload is a list array (starts with [0]), use payload[0]
-        if (is_array($payload) && !empty($payload) && array_is_list($payload)) {
-            // It's a list array, use the first element
-            $payload = $payload[0];
-        }
+        $payload = FluentWebhookPayload::normalize($event->payload ?? []);
 
         // Extract identifiers from __submission
         $formId = $payload['__submission']['form_id'] ?? null;
         $entryId = $payload['__submission']['id'] ?? null;
 
         // Validate required fields - handle gracefully without throwing
-        if (!$formId || !$entryId) {
-            $errorMessage = 'Missing form_id or entry_id in webhook payload. ' .
+        if (Validator::make($payload, [
+            '__submission.form_id' => ['required', 'integer', 'min:1'],
+            '__submission.id' => ['required', 'integer', 'min:1'],
+        ])->fails()) {
+            $errorMessage = 'Missing form_id or entry_id in webhook payload. '.
                 'Expected in payload["__submission"]["form_id"] and payload["__submission"]["id"]';
-            
+
             Log::error('ProcessFluentWebhookEvent failed', [
                 'webhook_event_id' => $this->webhookEventId,
                 'error' => $errorMessage,
@@ -95,7 +94,7 @@ class ProcessFluentWebhookEvent implements ShouldQueue
 
         // Extract amount from multiple possible locations
         $amount = null;
-        
+
         // First try: __submission.payment_total (likely in cents)
         if (isset($meta['submission']['payment_total'])) {
             $paymentTotal = $meta['submission']['payment_total'];
@@ -105,12 +104,12 @@ class ProcessFluentWebhookEvent implements ShouldQueue
                 $amount = $numAmount / 100;
             }
         }
-        
+
         // Second try: __order_items[0].formatted_line_total or formatted_item_price (formatted string like "$25.00")
-        if ($amount === null && !empty($orderItems) && is_array($orderItems) && isset($orderItems[0])) {
+        if ($amount === null && ! empty($orderItems) && is_array($orderItems) && isset($orderItems[0])) {
             $firstItem = $orderItems[0];
             $formattedAmount = $firstItem['formatted_line_total'] ?? $firstItem['formatted_item_price'] ?? null;
-            
+
             if ($formattedAmount && is_string($formattedAmount)) {
                 // Remove currency symbols and commas, then parse
                 $cleaned = preg_replace('/[^\d.]/', '', $formattedAmount);
@@ -133,7 +132,7 @@ class ProcessFluentWebhookEvent implements ShouldQueue
                 ->where('form_id', (int) $formId)
                 ->exists();
 
-            if (!$schemaExists) {
+            if (! $schemaExists) {
                 // Schema not cached yet — sync in a dedicated background job
                 // so this queue worker returns immediately.
                 SyncFormSchema::dispatch($website, (int) $formId);
@@ -162,14 +161,14 @@ class ProcessFluentWebhookEvent implements ShouldQueue
         );
 
         // Notify all admin users if this is a new submission
-        if (!$existingSubmission) {
+        if (! $existingSubmission) {
             $adminUsers = User::where('is_admin', true)->get();
 
             Log::info('FluentWebhook: sending notifications', [
                 'webhook_event_id' => $this->webhookEventId,
-                'submission_id'    => $submission->id,
-                'admin_users'      => $adminUsers->count(),
-                'queue_driver'     => config('queue.default'),
+                'submission_id' => $submission->id,
+                'admin_users' => $adminUsers->count(),
+                'queue_driver' => config('queue.default'),
                 'broadcast_driver' => config('broadcasting.default'),
             ]);
 
@@ -183,19 +182,19 @@ class ProcessFluentWebhookEvent implements ShouldQueue
                 try {
                     $user->notify(new NewFormSubmissionNotification($submission));
                     Log::info('FluentWebhook: notification dispatched', [
-                        'user_id'       => $user->id,
+                        'user_id' => $user->id,
                         'submission_id' => $submission->id,
                     ]);
                 } catch (\Exception $e) {
                     Log::error('FluentWebhook: notification failed', [
                         'user_id' => $user->id,
-                        'error'   => $e->getMessage(),
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }
         } else {
             Log::info('FluentWebhook: duplicate submission — notification skipped', [
-                'webhook_event_id'    => $this->webhookEventId,
+                'webhook_event_id' => $this->webhookEventId,
                 'existing_submission' => $existingSubmission->id,
             ]);
         }

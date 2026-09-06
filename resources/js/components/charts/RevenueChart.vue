@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -10,6 +9,7 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
   type ChartOptions,
 } from 'chart.js'
 import { computed } from 'vue'
@@ -21,7 +21,8 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler
 )
 
 interface Props {
@@ -55,7 +56,9 @@ const chartData = computed(() => {
 })
 
 const chartOptions = computed<ChartOptions<'line'>>(() => {
-  const isDark = document.documentElement.classList.contains('dark')
+  const isDark =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('dark')
   const textColor = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)'
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
 
@@ -76,8 +79,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         borderWidth: 1,
         callbacks: {
           label: (context) => {
-            const value = context.parsed.y
-            // @ts-ignore
+            const value = context.parsed.y ?? 0
             return new Intl.NumberFormat('en-US', {
               style: 'currency',
               currency: props.currency,
@@ -108,7 +110,6 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         ticks: {
           color: textColor,
           callback: (value) => {
-            // @ts-ignore
             return new Intl.NumberFormat('en-US', {
               style: 'currency',
               currency: props.currency,
@@ -128,4 +129,3 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     <Line :data="chartData" :options="chartOptions" />
   </div>
 </template>
-
