@@ -2,392 +2,93 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Website;
+use App\Http\Requests\CustomersFilterRequest;
 use App\Models\WcOrder;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
-use Inertia\Inertia;
+use App\Models\Website;
+use App\Services\CustomerListing;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Inertia\Inertia;
 
 class CustomersController extends Controller
 {
-    /**
-     * Get unique countries from the websites this user can access.
-     */
-    private function getUniqueCountries(array $websiteIds): array
+    public function __construct(private CustomerListing $listing) {}
+
+    public function index(CustomersFilterRequest $request)
     {
-        $allCountries = [];
-        WcOrder::whereNotNull('customer_email')
-            ->whereIn('website_id', $websiteIds)
-            ->whereNotNull('payload')
-            ->select('payload')
-            ->chunk(100, function ($orders) use (&$allCountries) {
-                foreach ($orders as $order) {
-                    $country = $this->extractCountryFromPayload($order->payload ?? []);
-                    if (!empty($country)) {
-                        $allCountries[$country] = true;
-                    }
-                }
-            });
-        $uniqueCountries = array_keys($allCountries);
-        sort($uniqueCountries);
-        return $uniqueCountries;
-    }
-
-    /**
-     * Reuse existing country enrichment without delaying page requests.
-     */
-    private function getCountryFromIp(string $ip): ?string
-    {
-        // Skip local/private IPs
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-            return null;
-        }
-
-        $country = Cache::get("ip_country_{$ip}");
-
-        return is_string($country) && preg_match('/^[A-Z]{2,3}$/i', trim($country))
-            ? strtoupper(trim($country))
-            : null;
-    }
-
-    /**
-     * Extract IP address from order payload
-     */
-    private function extractIpFromPayload(array $payload): ?string
-    {
-        // Check common WooCommerce IP fields
-        $ip = data_get($payload, 'customer_ip_address') 
-            ?? data_get($payload, 'customer_ip')
-            ?? data_get($payload, 'ip_address');
-
-        // Also check meta_data for IP
-        if (!$ip) {
-            $metaData = $payload['meta_data'] ?? [];
-            foreach ($metaData as $meta) {
-                if (isset($meta['key']) && 
-                    (stripos($meta['key'], 'customer_ip') !== false || 
-                     stripos($meta['key'], 'ip_address') !== false)) {
-                    $ip = $meta['value'] ?? null;
-                    break;
-                }
-            }
-        }
-
-        return $ip ? trim($ip) : null;
-    }
-
-    /**
-     * Extract country from saved order data and existing enrichment cache.
-     */
-    private function extractCountryFromPayload(array $payload): ?string
-    {
-        // First try to get country from billing address (most common and fastest)
-        $country = data_get($payload, 'billing.country');
-        
-        if (!empty($country)) {
-            return $country;
-        }
-        
-        // Missing enrichment remains unknown; rendering never calls an external API.
-        $ip = $this->extractIpFromPayload($payload);
-        if ($ip) {
-            return $this->getCountryFromIp($ip);
-        }
-        
-        return null;
-    }
-
-    /**
-     * Get country for a customer (most frequent or first order country)
-     */
-    private function getCustomerCountry(string $email, array $websiteIds): ?string
-    {
-        // Get all orders for this customer
-        $orders = WcOrder::where('customer_email', $email)
-            ->whereIn('website_id', $websiteIds)
-            ->whereNotNull('payload')
-            ->select('payload')
-            ->get();
-
-        $countries = [];
-        foreach ($orders as $order) {
-            $country = $this->extractCountryFromPayload($order->payload ?? []);
-            if (!empty($country)) {
-                $countries[] = $country;
-            }
-        }
-
-        if (empty($countries)) {
-            return null;
-        }
-
-        // Return most frequent country, or first if tied
-        $countryCounts = array_count_values($countries);
-        arsort($countryCounts);
-        return array_key_first($countryCounts);
-    }
-
-    public function index(Request $request)
-    {
-        $user = $request->user();
-        $websites = Website::query()
-            ->when(! $user->is_admin, fn ($query) => $query->where('user_id', $user->id))
-            ->select('id', 'name')
-            ->orderBy('name')
-            ->get();
-        $userWebsiteIds = $websites->pluck('id')->all();
-
-        // Parse date range filters
-        $startDate = $request->input('start_date') 
-            ? Carbon::parse($request->input('start_date'))->startOfDay()
-            : null;
-        
-        $endDate = $request->input('end_date')
-            ? Carbon::parse($request->input('end_date'))->endOfDay()
-            : null;
-
-        // Build base query for filtering orders
-        $orderQuery = WcOrder::query()
-            ->whereIn('website_id', $userWebsiteIds)
-            ->whereNotNull('customer_email')
-            ->where('customer_email', '!=', '');
-
-        // Apply date range filter
-        if ($startDate && $endDate) {
-            $orderQuery->whereBetween('created_at_wp', [$startDate, $endDate]);
-        }
-
-        // Apply website filter
-        if ($request->filled('website_ids')) {
-            $websiteIds = is_array($request->website_ids) 
-                ? $request->website_ids 
-                : explode(',', $request->website_ids);
-            $websiteIds = array_map('intval', $websiteIds);
-            $orderQuery->whereIn('website_id', $websiteIds);
-        }
-
-        // Apply order status filter
-        $paymentStatusFilter = $request->input('payment_status', 'all');
-        if ($paymentStatusFilter === 'paid') {
-            $orderQuery->where('status', 'completed');
-        } elseif ($paymentStatusFilter === 'pending') {
-            $orderQuery->where('status', '!=', 'completed');
-        }
-        // 'all' means no additional filter
-
-        // Apply country filter if provided (filter orders by country in payload)
-        $countryFilter = $request->input('country');
-        if ($countryFilter) {
-            // Get orders matching country filter
-            $countryOrderIds = [];
-            (clone $orderQuery)
-                ->select('id', 'payload')
-                ->chunk(100, function ($orders) use (&$countryOrderIds, $countryFilter) {
-                    foreach ($orders as $order) {
-                        $country = $this->extractCountryFromPayload($order->payload ?? []);
-                        if ($country === $countryFilter) {
-                            $countryOrderIds[] = $order->id;
-                        }
-                    }
-                });
-            
-            if (empty($countryOrderIds)) {
-                // No orders match country filter
-                $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
-                
-                return Inertia::render('Customers/Index', [
-                    'customers' => [
-                        'data' => [],
-                        'links' => [],
-                        'meta' => [
-                            'current_page' => 1,
-                            'last_page' => 1,
-                            'per_page' => 15,
-                            'total' => 0,
-                        ],
-                    ],
-                    'websites' => $websites->toArray(),
-                    'countries' => $uniqueCountries,
-                    'filters' => [
-                        'start_date' => $startDate?->format('Y-m-d'),
-                        'end_date' => $endDate?->format('Y-m-d'),
-                        'website_ids' => is_array($request->input('website_ids')) 
-                            ? array_map('intval', $request->input('website_ids', []))
-                            : [],
-                        'country' => $countryFilter,
-                        'min_spend' => $request->input('min_spend'),
-                        'payment_status' => $paymentStatusFilter,
-                    ],
-                ]);
-            }
-            
-            // Filter order query to only include orders matching country
-            $orderQuery->whereIn('id', $countryOrderIds);
-        }
-
-        // Get customer emails that match filters
-        $customerEmails = (clone $orderQuery)
-            ->select('customer_email')
-            ->distinct()
-            ->pluck('customer_email')
-            ->toArray();
-
-        if (empty($customerEmails)) {
-            // Get unique countries for filter dropdown
-            $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
-            
-            return Inertia::render('Customers/Index', [
-                'customers' => [
-                    'data' => [],
-                    'links' => [],
-                    'meta' => [
-                        'current_page' => 1,
-                        'last_page' => 1,
-                        'per_page' => 15,
-                        'total' => 0,
-                    ],
-                ],
-                'websites' => $websites->toArray(),
-                'countries' => $uniqueCountries,
-                'filters' => [
-                    'start_date' => $startDate?->format('Y-m-d'),
-                    'end_date' => $endDate?->format('Y-m-d'),
-                    'website_ids' => is_array($request->input('website_ids')) 
-                        ? array_map('intval', $request->input('website_ids', []))
-                        : [],
-                    'country' => $request->input('country'),
-                    'min_spend' => $request->input('min_spend'),
-                    'payment_status' => $paymentStatusFilter,
-                ],
-            ]);
-        }
-
-        // Build aggregated customer query
-        $customerQuery = WcOrder::query()
-            ->whereIn('website_id', $userWebsiteIds)
-            ->select([
-                'customer_email',
-                DB::raw('COUNT(*) as orders_count'),
-                DB::raw('SUM(CASE WHEN status = "completed" THEN total ELSE 0 END) as total_spent'),
-                DB::raw('MIN(created_at_wp) as first_order_at'),
-                DB::raw('MAX(created_at_wp) as last_order_at'),
-                DB::raw('GROUP_CONCAT(DISTINCT website_id) as website_ids'),
-            ])
-            ->whereIn('customer_email', $customerEmails)
-            ->groupBy('customer_email');
-
-        // Apply minimum spend filter
-        if ($request->filled('min_spend')) {
-            $minSpend = (float) $request->input('min_spend');
-            $customerQuery->havingRaw('SUM(CASE WHEN status = "completed" THEN total ELSE 0 END) >= ?', [$minSpend]);
-        }
-
-        // Apply sorting
-        $sortBy = $request->input('sort_by', 'last_order_at');
-        $sortDir = $request->input('sort_dir', 'desc');
-        
-        if ($sortBy === 'orders_count') {
-            $customerQuery->orderBy('orders_count', $sortDir);
-        } elseif ($sortBy === 'total_spent') {
-            $customerQuery->orderBy('total_spent', $sortDir);
-        } elseif ($sortBy === 'last_order_at') {
-            $customerQuery->orderBy('last_order_at', $sortDir);
-        } else {
-            $customerQuery->orderBy('last_order_at', 'desc');
-        }
-
-        // Get all results first (before pagination) to transform
-        $allCustomers = $customerQuery->get();
-
-        // Transform results to include additional data
-        $transformedCustomers = $allCustomers->map(function ($customer) use ($userWebsiteIds) {
-            $email = $customer->customer_email;
-            
-            // Get website names
-            $websiteIds = explode(',', $customer->website_ids ?? '');
-            $websiteIds = array_filter(array_map('intval', $websiteIds));
-            $websites = Website::whereIn('id', $websiteIds)
-                ->select('id', 'name')
-                ->get()
-                ->pluck('name')
-                ->toArray();
-
-            // Calculate AOV
-            $totalSpent = (float) ($customer->total_spent ?? 0);
-            $ordersCount = (int) ($customer->orders_count ?? 0);
-            $aov = $ordersCount > 0 ? ($totalSpent / $ordersCount) : 0;
-
-            // Get country (most frequent or first order)
-            $country = $this->getCustomerCountry($email, $userWebsiteIds);
-
-            // Handle dates - they come as strings from DB::raw(), so parse them
-            $firstOrderAt = $customer->first_order_at 
-                ? (is_string($customer->first_order_at) 
-                    ? Carbon::parse($customer->first_order_at)->format('Y-m-d H:i:s')
-                    : $customer->first_order_at->format('Y-m-d H:i:s'))
-                : null;
-            
-            $lastOrderAt = $customer->last_order_at
-                ? (is_string($customer->last_order_at)
-                    ? Carbon::parse($customer->last_order_at)->format('Y-m-d H:i:s')
-                    : $customer->last_order_at->format('Y-m-d H:i:s'))
-                : null;
-
-            return [
-                'email' => $email,
-                'orders_count' => $ordersCount,
-                'total_spent' => $totalSpent,
-                'average_order_value' => $aov,
-                'websites' => $websites,
-                'country' => $country,
-                'first_order_at' => $firstOrderAt,
-                'last_order_at' => $lastOrderAt,
-            ];
-        });
-
-        // Paginate transformed results
-        $perPage = (int) $request->input('per_page', 15);
-        $currentPage = (int) $request->input('page', 1);
-        $total = $transformedCustomers->count();
-        $items = $transformedCustomers->forPage($currentPage, $perPage);
-        
-        $paginatedCustomers = new \Illuminate\Pagination\LengthAwarePaginator(
-            $items,
-            $total,
-            $perPage,
-            $currentPage,
-            [
-                'path' => $request->url(),
-                'query' => $request->query(),
-            ]
-        );
-        
-        // Ensure paginator has proper structure for Inertia
-        $paginatedCustomers->withQueryString();
-
-        // Get unique countries for filter dropdown
-        $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
+        $filters = $request->filters();
+        $websites = $this->listing->websites($request->user());
+        $websiteIds = $websites->pluck('id')->all();
+        $orders = $this->listing->orders($websiteIds, $filters);
+        $customers = $this->listing->customers($orders, $filters)
+            ->paginate((int) ($request->validated('per_page') ?? 15))
+            ->withQueryString();
+        $customers->setCollection($this->listing->enrich($customers->getCollection(), $orders, $websites));
 
         return Inertia::render('Customers/Index', [
-            'customers' => $paginatedCustomers,
+            'customers' => $customers,
             'websites' => $websites->toArray(),
-            'countries' => $uniqueCountries,
-            'filters' => [
-                'start_date' => $startDate?->format('Y-m-d'),
-                'end_date' => $endDate?->format('Y-m-d'),
-                'website_ids' => is_array($request->input('website_ids')) 
-                    ? array_map('intval', $request->input('website_ids', []))
-                    : [],
-                'country' => $request->input('country'),
-                'min_spend' => $request->input('min_spend'),
-                'payment_status' => $paymentStatusFilter,
-                'sort_by' => $sortBy,
-                'sort_dir' => $sortDir,
-            ],
+            'countries' => $this->listing->uniqueCountries($websiteIds),
+            'filters' => $filters,
         ]);
+    }
+
+    public function export(CustomersFilterRequest $request)
+    {
+        $filters = $request->filters();
+        $websites = $this->listing->websites($request->user());
+        $scope = $filters['website_ids'] === [] ? 'all-websites' : 'selected-websites';
+        if (count($filters['website_ids']) === 1 && ($website = $websites->firstWhere('id', $filters['website_ids'][0]))) {
+            $scope = substr(Str::slug($website->name), 0, 80) ?: 'selected-website';
+        }
+
+        return response()->streamDownload(function () use ($filters, $websites) {
+            $output = fopen('php://output', 'w');
+            try {
+                // A live order must not move customers between export batches.
+                // This applies to the next transaction only, not the connection default.
+                if (DB::getDriverName() === 'mysql' && DB::transactionLevel() === 0) {
+                    DB::statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+                }
+                DB::transaction(function () use ($output, $filters, $websites) {
+                    $orders = $this->listing->orders($websites->pluck('id')->all(), $filters);
+                    $customers = $this->listing->customers($orders, $filters);
+                    fwrite($output, "\xEF\xBB\xBF");
+                    fputcsv($output, ['Email', 'Orders', 'Total spent', 'Average order value', 'Websites', 'Country', 'First order', 'Last order'], ',', '"', '', "\r\n");
+                    $customers->chunk(CustomerListing::BATCH_SIZE, function (Collection $batch) use ($output, $orders, $websites) {
+                        foreach ($this->listing->enrich($batch, $orders, $websites) as $customer) {
+                            fputcsv($output, [
+                                $this->csvText($customer['email']),
+                                $customer['orders_count'],
+                                number_format($customer['total_spent'], 2, '.', ''),
+                                number_format($customer['average_order_value'], 2, '.', ''),
+                                $this->csvText(implode('; ', $customer['websites'])),
+                                $this->csvText($customer['country'] ?? ''),
+                                $customer['first_order_at'] ?? '',
+                                $customer['last_order_at'] ?? '',
+                            ], ',', '"', '', "\r\n");
+                        }
+
+                        return ! connection_aborted();
+                    });
+                });
+            } finally {
+                fclose($output);
+            }
+        }, 'customers-'.$scope.'-'.now()->format('Y-m-d').'.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    private function csvText(string $value): string
+    {
+        // Quoting alone does not prevent spreadsheet formulas, including after whitespace.
+        return preg_match('/^[\s\x00-\x1F]*[=+\-@\t\r\n]/u', $value) ? "'".$value : $value;
     }
 
     public function show(Request $request, string $email)
@@ -438,14 +139,15 @@ class CustomersController extends Controller
             ->toArray();
 
         // Get country (most frequent)
-        $country = $this->getCustomerCountry($email, $userWebsiteIds);
+        $country = $this->listing->customerCountry($email, $userWebsiteIds);
 
         // Revenue over time (grouped by date)
         $revenueOverTime = $paidOrders
             ->groupBy(function ($order) {
-                if (!$order->created_at_wp) {
+                if (! $order->created_at_wp) {
                     return null;
                 }
+
                 return is_string($order->created_at_wp)
                     ? Carbon::parse($order->created_at_wp)->format('Y-m-d')
                     : $order->created_at_wp->format('Y-m-d');
@@ -469,7 +171,7 @@ class CustomersController extends Controller
             ->map(function ($websiteOrders, $websiteId) {
                 $website = $websiteOrders->first()->website;
                 $paidWebsiteOrders = $websiteOrders->where('status', 'completed');
-                
+
                 return [
                     'website_id' => $websiteId,
                     'website_name' => $website?->name ?? 'Unknown',
@@ -482,10 +184,11 @@ class CustomersController extends Controller
 
         // Country history (if available in payloads)
         $countryHistory = [];
+        $orderCountries = $this->listing->countriesForOrders($orders);
         foreach ($orders as $order) {
-            $orderCountry = $this->extractCountryFromPayload($order->payload ?? []);
-            if (!empty($orderCountry) && $order->created_at_wp) {
-                $date = is_string($order->created_at_wp) 
+            $orderCountry = $orderCountries[$order->id] ?? null;
+            if (! empty($orderCountry) && $order->created_at_wp) {
+                $date = is_string($order->created_at_wp)
                     ? Carbon::parse($order->created_at_wp)->format('Y-m-d')
                     : $order->created_at_wp->format('Y-m-d');
                 $countryHistory[] = [
@@ -507,8 +210,8 @@ class CustomersController extends Controller
                 'average_order_value' => $averageOrderValue,
                 'websites' => $websites,
                 'country' => $country,
-                'first_order_at' => ($firstOrder = $orders->min('created_at_wp')) 
-                    ? (is_string($firstOrder) 
+                'first_order_at' => ($firstOrder = $orders->min('created_at_wp'))
+                    ? (is_string($firstOrder)
                         ? Carbon::parse($firstOrder)->format('Y-m-d H:i:s')
                         : $firstOrder->format('Y-m-d H:i:s'))
                     : null,
