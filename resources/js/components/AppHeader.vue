@@ -257,7 +257,7 @@ const rightNavItems: NavItem[] = [
                         </div>
                     </div>
 
-                    <NotificationBell v-if="auth.user" />
+                    <NotificationBell v-if="auth.user" :key="auth.user.id" />
 
                     <DropdownMenu>
                         <DropdownMenuTrigger :as-child="true">

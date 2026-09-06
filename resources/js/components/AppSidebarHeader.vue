@@ -32,7 +32,7 @@ const auth = computed(() => page.props.auth);
         </div>
 
         <div class="flex items-center gap-2">
-            <NotificationBell v-if="auth.user" />
+            <NotificationBell v-if="auth.user" :key="auth.user.id" />
             <AppearanceDropdown />
         </div>
     </header>

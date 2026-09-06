@@ -3,8 +3,6 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Inertia\Inertia;
 
 class NotificationController extends Controller
 {
@@ -20,6 +18,7 @@ class NotificationController extends Controller
             ->get()
             ->map(function ($notification) {
                 $data = $notification->data;
+
                 return [
                     'id' => $notification->id,
                     'type' => $data['type'] ?? 'unknown',
@@ -33,7 +32,7 @@ class NotificationController extends Controller
         return response()->json([
             'notifications' => $notifications,
             'unread_count' => $request->user()->unreadNotifications()->count(),
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     /**
@@ -45,7 +44,7 @@ class NotificationController extends Controller
             ->notifications()
             ->findOrFail($id);
 
-        if (!$notification->read_at) {
+        if (! $notification->read_at) {
             $notification->markAsRead();
         }
 
@@ -69,6 +68,7 @@ class NotificationController extends Controller
         return response()->json([
             'success' => true,
             'redirect_url' => $redirectUrl,
+            'unread_count' => $request->user()->unreadNotifications()->count(),
         ]);
     }
 
@@ -77,9 +77,11 @@ class NotificationController extends Controller
      */
     public function markAllAsRead(Request $request)
     {
-        $request->user()->unreadNotifications->markAsRead();
+        $request->user()->unreadNotifications()->update(['read_at' => now()]);
 
-        return response()->json(['success' => true]);
+        return response()->json([
+            'success' => true,
+            'unread_count' => $request->user()->unreadNotifications()->count(),
+        ]);
     }
 }
-

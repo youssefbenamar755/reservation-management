@@ -103,7 +103,6 @@ function requestOrderRefresh(data?: any) {
 const onOrderNotification = (data: any) => {
   if (data?.type === 'order') {
     requestOrderRefresh(data)
-    toast.success('New order received!')
   }
 }
 
