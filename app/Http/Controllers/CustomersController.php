@@ -6,7 +6,6 @@ use App\Models\Website;
 use App\Models\WcOrder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 use Carbon\Carbon;
@@ -38,7 +37,7 @@ class CustomersController extends Controller
     }
 
     /**
-     * Get country from IP address using ipinfo.io
+     * Reuse existing country enrichment without delaying page requests.
      */
     private function getCountryFromIp(string $ip): ?string
     {
@@ -47,22 +46,11 @@ class CustomersController extends Controller
             return null;
         }
 
-        // Cache results for 24 hours to avoid API rate limits
-        return Cache::remember("ip_country_{$ip}", 86400, function () use ($ip) {
-            try {
-                $response = Http::timeout(3)->get("https://ipinfo.io/{$ip}/country");
-                
-                if ($response->successful()) {
-                    $countryCode = trim($response->body());
-                    // Return country code if valid (2-3 letters)
-                    return !empty($countryCode) && strlen($countryCode) <= 3 ? $countryCode : null;
-                }
-            } catch (\Exception $e) {
-                // Silently fail - return null if API is unavailable
-            }
-            
-            return null;
-        });
+        $country = Cache::get("ip_country_{$ip}");
+
+        return is_string($country) && preg_match('/^[A-Z]{2,3}$/i', trim($country))
+            ? strtoupper(trim($country))
+            : null;
     }
 
     /**
@@ -92,7 +80,7 @@ class CustomersController extends Controller
     }
 
     /**
-     * Extract country from order payload (with IP lookup fallback)
+     * Extract country from saved order data and existing enrichment cache.
      */
     private function extractCountryFromPayload(array $payload): ?string
     {
@@ -103,7 +91,7 @@ class CustomersController extends Controller
             return $country;
         }
         
-        // If no country in billing, try to get from IP address (slower, but cached)
+        // Missing enrichment remains unknown; rendering never calls an external API.
         $ip = $this->extractIpFromPayload($payload);
         if ($ip) {
             return $this->getCountryFromIp($ip);

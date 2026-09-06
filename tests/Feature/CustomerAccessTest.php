@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Models\WcOrder;
 use App\Models\Website;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -140,3 +141,45 @@ test('admins retain access to customers across all websites', function () {
             ->has('customer.websites', 2)
         );
 });
+
+test('customer pages only use validated cached country enrichment without HTTP', function ($cachedCountry, ?string $expectedCountry) {
+    Http::fake(['*' => Http::response('US')]);
+    $this->ownedWebsite->wcOrders()->first()->update([
+        'payload' => ['customer_ip_address' => '8.8.8.8'],
+    ]);
+    if ($cachedCountry !== null) {
+        Cache::put('ip_country_8.8.8.8', $cachedCountry, 3600);
+    }
+
+    $this->actingAs($this->owner)
+        ->get(route('customers.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Customers/Index')
+            ->has('customers.data', 1)
+            ->where('customers.data.0.country', $expectedCountry)
+            ->where('countries', $expectedCountry ? [$expectedCountry] : [])
+        );
+
+    $this->get(route('customers.show', ['email' => 'shared@example.com']))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Customers/Show')
+            ->where('customer.country', $expectedCountry)
+            ->has('countryHistory', $expectedCountry ? 1 : 0)
+            ->has('orders', 1)
+        );
+
+    $this->get(route('customers.index', ['country' => 'US']))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('customers.data', $expectedCountry === 'US' ? 1 : 0)
+        );
+
+    Http::assertNothingSent();
+})->with([
+    'missing country cache' => [null, null],
+    'cached country normalized' => [' us ', 'US'],
+    'invalid cached country' => ['error!', null],
+    'non-string cached value' => [['country' => 'US'], null],
+]);
