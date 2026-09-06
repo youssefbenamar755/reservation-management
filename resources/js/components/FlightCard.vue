@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { 
-  Plane, 
-  Eye,
-  EyeOff
-} from 'lucide-vue-next'
+import { ArrowRight, ChevronDown, Code2, Plane } from 'lucide-vue-next'
 
 interface Props {
   flightData: any
@@ -111,7 +104,7 @@ function getAirportCity(iataCode: string): string {
 
 // Get segments for an itinerary
 function getSegments(itinerary: any): any[] {
-  return itinerary.segments || []
+  return Array.isArray(itinerary?.segments) ? itinerary.segments : []
 }
 
 
@@ -179,146 +172,255 @@ const priceInfo = computed(() => {
 </script>
 
 <template>
-  <div v-if="isValidFlightData" class="space-y-4 w-full">
-    <!-- B) ITINERARIES (Timeline / Cards) -->
-    <Card v-if="props.flightData.itineraries && props.flightData.itineraries.length > 0">
-      <CardHeader class="pb-4">
-        <CardTitle class="text-base">Itineraries</CardTitle>
-      </CardHeader>
-      <CardContent class="space-y-10">
-        <template v-for="(itinerary, itineraryIndex) in props.flightData.itineraries" :key="itineraryIndex">
-          <!-- Itinerary Header -->
-          <div v-if="props.flightData.itineraries.length > 1" class="pb-4 border-b">
-            <h3 class="text-lg font-semibold mb-1">{{ itineraryIndex === 0 ? 'Outbound Flight' : 'Return Flight' }}</h3>
-            <p class="text-sm text-muted-foreground">
-              {{ formatDateTime(getSegments(itinerary)[0]?.departure?.at || '').date }} - 
-              {{ formatDateTime(getSegments(itinerary)[getSegments(itinerary).length - 1]?.arrival?.at || '').date }}
-            </p>
-          </div>
-          
-          <!-- Segments -->
-          <div class="space-y-10">
+    <div v-if="isValidFlightData" class="min-w-0 space-y-4">
+        <dl
+            class="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-4 sm:p-4"
+        >
+            <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">Airline</dt>
+                <dd class="mt-1 text-sm font-semibold break-words">
+                    {{ airlineCodes.join(', ') || '—' }}
+                </dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">Passengers</dt>
+                <dd class="mt-1 text-sm font-semibold">
+                    {{ passengerCount }}
+                    {{ passengerCount === 1 ? 'person' : 'people' }}
+                </dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">Class</dt>
+                <dd class="mt-1 text-sm font-semibold break-words">
+                    {{ cabinClass }}
+                </dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">Total price</dt>
+                <dd class="mt-1 text-base font-bold break-words text-primary">
+                    {{ formatCurrency(priceInfo.total, priceInfo.currency) }}
+                </dd>
+            </div>
+        </dl>
+
+        <section
+            v-for="(itinerary, itineraryIndex) in props.flightData
+                .itineraries || []"
+            :key="itineraryIndex"
+            class="min-w-0 overflow-hidden rounded-lg border"
+            :aria-label="
+                itineraryIndex === 0
+                    ? 'Outbound flight'
+                    : itineraryIndex === 1
+                      ? 'Return flight'
+                      : `Flight ${Number(itineraryIndex) + 1}`
+            "
+        >
             <div
-              v-for="(segment, segmentIndex) in getSegments(itinerary)"
-              :key="segmentIndex"
-              class="space-y-6"
+                class="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2.5 sm:px-4"
             >
-              <!-- Flight Route -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8 items-center">
-                <!-- Departure -->
-                <div class="space-y-2">
-                  <p class="text-sm font-medium text-muted-foreground">Departure</p>
-                  <div class="space-y-1">
-                    <div class="text-2xl sm:text-3xl font-bold">{{ formatDateTime(segment.departure?.at || '').time }}</div>
-                    <div class="text-lg sm:text-xl font-semibold">{{ segment.departure?.iataCode || '—' }}</div>
-                    <div class="text-sm sm:text-base text-muted-foreground">{{ getAirportCity(segment.departure?.iataCode || '') }}</div>
-                    <div class="text-xs sm:text-sm text-muted-foreground mt-2">
-                      {{ formatDateTime(segment.departure?.at || '').date }}
-                      <span v-if="segment.departure?.terminal" class="ml-2">Terminal {{ segment.departure.terminal }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Flight Connection -->
-                <div class="flex flex-col items-center gap-3 py-4">
-                  <div class="flex items-center gap-3 w-full">
-                    <div class="flex-1 h-0.5 bg-border"></div>
-                    <div class="flex flex-col items-center gap-1">
-                      <Plane class="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-                      <span class="text-xs font-medium text-muted-foreground">{{ formatDuration(segment.duration || '') }}</span>
-                    </div>
-                    <div class="flex-1 h-0.5 bg-border"></div>
-                  </div>
-                  <div class="text-center space-y-1">
-                    <p class="text-xs sm:text-sm font-medium">{{ segment.carrierCode }} {{ segment.number }}</p>
-                    <p class="text-xs text-muted-foreground">
-                      <span v-if="segment.numberOfStops === 0">Non-stop flight</span>
-                      <span v-else>{{ segment.numberOfStops }} {{ segment.numberOfStops === 1 ? 'stop' : 'stops' }}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Arrival -->
-                <div class="space-y-2 text-left md:text-right">
-                  <p class="text-sm font-medium text-muted-foreground">Arrival</p>
-                  <div class="space-y-1">
-                    <div class="text-2xl sm:text-3xl font-bold">{{ formatDateTime(segment.arrival?.at || '').time }}</div>
-                    <div class="text-lg sm:text-xl font-semibold">{{ segment.arrival?.iataCode || '—' }}</div>
-                    <div class="text-sm sm:text-base text-muted-foreground">{{ getAirportCity(segment.arrival?.iataCode || '') }}</div>
-                    <div class="text-xs sm:text-sm text-muted-foreground mt-2 text-left md:text-right">
-                      {{ formatDateTime(segment.arrival?.at || '').date }}
-                      <span v-if="segment.arrival?.terminal" class="ml-2">Terminal {{ segment.arrival.terminal }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Connection Info (if not last segment) -->
-              <div v-if="segmentIndex < getSegments(itinerary).length - 1" class="pt-4 border-t">
-                <p class="text-sm text-muted-foreground text-center">
-                  Connection at {{ segment.arrival?.iataCode }} • 
-                  Next flight: {{ getSegments(itinerary)[segmentIndex + 1]?.carrierCode }} {{ getSegments(itinerary)[segmentIndex + 1]?.number }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </template>
-              <!-- Flight Details -->
-              <div class="pt-6 border-t">
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
-            <div class="text-center md:text-left">
-              <p class="text-sm text-muted-foreground mb-2">Airline</p>
-              <p class="text-base font-semibold">
-                <span v-for="(code, index) in airlineCodes" :key="index">
-                  {{ code }}<span v-if="Number(index) < airlineCodes.length - 1">, </span>
+                <h4 class="flex items-center gap-2 text-sm font-semibold">
+                    <Plane
+                        class="h-4 w-4 shrink-0 text-primary"
+                        aria-hidden="true"
+                    />
+                    {{
+                        itineraryIndex === 0
+                            ? 'Outbound flight'
+                            : itineraryIndex === 1
+                              ? 'Return flight'
+                              : `Flight ${Number(itineraryIndex) + 1}`
+                    }}
+                </h4>
+                <span class="text-xs text-muted-foreground">
+                    {{ getSegments(itinerary).length }}
+                    {{
+                        getSegments(itinerary).length === 1
+                            ? 'segment'
+                            : 'segments'
+                    }}
                 </span>
-              </p>
             </div>
-            <div class="text-center md:text-left">
-              <p class="text-sm text-muted-foreground mb-2">Passengers</p>
-              <p class="text-base font-semibold">{{ passengerCount }} {{ passengerCount === 1 ? 'person' : 'people' }}</p>
-            </div>
-            <div class="text-center md:text-left">
-              <p class="text-sm text-muted-foreground mb-2">Class</p>
-              <p class="text-base font-semibold">{{ cabinClass }}</p>
-            </div>
-            <div class="text-center md:text-left">
-              <p class="text-sm text-muted-foreground mb-2">Total Price</p>
-              <p class="text-xl font-bold text-primary">
-                {{ formatCurrency(priceInfo.total, priceInfo.currency) }}
-              </p>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
 
-    <!-- Raw Flight Data (Collapsible) -->
-    <Card>
-      <CardHeader class="pb-4">
-        <div class="flex items-center justify-between">
-          <CardTitle class="text-base">Raw Data</CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            @click="showRawData = !showRawData"
-          >
-            <Eye v-if="!showRawData" class="h-4 w-4" />
-            <EyeOff v-else class="h-4 w-4" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent v-if="showRawData">
-        <div class="relative rounded-lg border bg-muted/20 p-4 max-h-96 overflow-y-auto">
-          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(props.flightData, null, 2) }}</pre>
-        </div>
-      </CardContent>
-    </Card>
-  </div>
-  
-  <!-- Fallback if invalid data -->
-  <div v-else class="p-4 rounded-lg border border-destructive/50 bg-destructive/10">
-    <p class="text-sm text-destructive">Invalid flight data structure</p>
-  </div>
+            <template
+                v-for="(segment, segmentIndex) in getSegments(itinerary)"
+                :key="segmentIndex"
+            >
+                <div class="min-w-0 space-y-3 p-3 sm:p-4">
+                    <div
+                        class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs"
+                    >
+                        <span class="font-medium"
+                            >{{ segment.carrierCode }}
+                            {{ segment.number }}</span
+                        >
+                        <span
+                            class="flex flex-wrap items-center gap-x-2 text-muted-foreground"
+                        >
+                            <span v-if="segment.duration">{{
+                                formatDuration(segment.duration)
+                            }}</span>
+                            <span v-if="segment.numberOfStops === 0"
+                                >Non-stop</span
+                            >
+                            <span
+                                v-else-if="
+                                    typeof segment.numberOfStops === 'number'
+                                "
+                            >
+                                {{ segment.numberOfStops }}
+                                {{
+                                    segment.numberOfStops === 1
+                                        ? 'stop'
+                                        : 'stops'
+                                }}
+                            </span>
+                        </span>
+                    </div>
+
+                    <div
+                        class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 sm:gap-4"
+                    >
+                        <div class="min-w-0">
+                            <p class="text-xs text-muted-foreground">
+                                Departure
+                            </p>
+                            <p
+                                class="mt-1 text-xl font-bold tracking-tight sm:text-2xl"
+                            >
+                                {{
+                                    formatDateTime(segment.departure?.at || '')
+                                        .time
+                                }}
+                            </p>
+                            <p class="mt-1 text-base font-semibold">
+                                {{ segment.departure?.iataCode || '—' }}
+                            </p>
+                            <p
+                                class="text-xs break-words text-muted-foreground"
+                            >
+                                {{
+                                    getAirportCity(
+                                        segment.departure?.iataCode || '',
+                                    )
+                                }}
+                            </p>
+                            <p class="mt-2 text-xs break-words">
+                                {{
+                                    formatDateTime(segment.departure?.at || '')
+                                        .date
+                                }}
+                            </p>
+                            <p
+                                v-if="segment.departure?.terminal"
+                                class="mt-0.5 text-xs break-words text-muted-foreground"
+                            >
+                                Terminal {{ segment.departure.terminal }}
+                            </p>
+                        </div>
+                        <ArrowRight
+                            class="mt-8 h-4 w-4 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                        />
+                        <div class="min-w-0 text-right">
+                            <p class="text-xs text-muted-foreground">Arrival</p>
+                            <p
+                                class="mt-1 text-xl font-bold tracking-tight sm:text-2xl"
+                            >
+                                {{
+                                    formatDateTime(segment.arrival?.at || '')
+                                        .time
+                                }}
+                            </p>
+                            <p class="mt-1 text-base font-semibold">
+                                {{ segment.arrival?.iataCode || '—' }}
+                            </p>
+                            <p
+                                class="text-xs break-words text-muted-foreground"
+                            >
+                                {{
+                                    getAirportCity(
+                                        segment.arrival?.iataCode || '',
+                                    )
+                                }}
+                            </p>
+                            <p class="mt-2 text-xs break-words">
+                                {{
+                                    formatDateTime(segment.arrival?.at || '')
+                                        .date
+                                }}
+                            </p>
+                            <p
+                                v-if="segment.arrival?.terminal"
+                                class="mt-0.5 text-xs break-words text-muted-foreground"
+                            >
+                                Terminal {{ segment.arrival.terminal }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    v-if="
+                        Number(segmentIndex) < getSegments(itinerary).length - 1
+                    "
+                    class="flex flex-wrap items-center gap-x-2 gap-y-1 border-y border-dashed bg-muted/20 px-3 py-2 text-xs sm:px-4"
+                >
+                    <span class="font-medium"
+                        >Connection at
+                        {{ segment.arrival?.iataCode || '—' }}</span
+                    >
+                    <span class="text-muted-foreground">
+                        Next flight:
+                        {{
+                            getSegments(itinerary)[Number(segmentIndex) + 1]
+                                ?.carrierCode
+                        }}
+                        {{
+                            getSegments(itinerary)[Number(segmentIndex) + 1]
+                                ?.number
+                        }}
+                    </span>
+                </div>
+            </template>
+            <p
+                v-if="getSegments(itinerary).length === 0"
+                class="p-3 text-sm text-muted-foreground sm:p-4"
+            >
+                No segment details available.
+            </p>
+        </section>
+
+        <details
+            class="group min-w-0 rounded-lg border"
+            @toggle="showRawData = ($event.target as HTMLDetailsElement).open"
+        >
+            <summary
+                class="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4 [&::-webkit-details-marker]:hidden"
+            >
+                <Code2
+                    class="h-4 w-4 text-muted-foreground"
+                    aria-hidden="true"
+                />
+                Flight data
+                <ChevronDown
+                    class="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
+                    aria-hidden="true"
+                />
+            </summary>
+            <div v-if="showRawData" class="border-t bg-muted/20 p-3 sm:p-4">
+                <pre
+                    class="max-h-80 overflow-auto font-mono text-xs break-words whitespace-pre-wrap"
+                    >{{ JSON.stringify(props.flightData, null, 2) }}</pre
+                >
+            </div>
+        </details>
+    </div>
+
+    <div
+        v-else
+        class="rounded-lg border border-destructive/50 bg-destructive/10 p-4"
+    >
+        <p class="text-sm text-destructive">Invalid flight data structure</p>
+    </div>
 </template>
-
