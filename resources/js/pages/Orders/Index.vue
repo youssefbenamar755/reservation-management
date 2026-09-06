@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { getEcho } from '@/lib/echo'
 import { runWooCommerceSync, summarizeWooCommerceSyncResults, type WooCommerceSyncCounts } from '@/lib/wooCommerceSync'
 import { createAutoRefresh, refreshOrdersSnapshot, type AutoRefreshState } from '@/lib/liveOrders'
+import { subscribeToOrders, type OrdersConnectionState } from '@/lib/ordersPush'
 
 const props = defineProps<{
   orders: any
@@ -49,12 +50,16 @@ const { onNotification, offNotification } = useEchoNotifications()
 
 const online = ref(true)
 const visible = ref(true)
+const connectionState = ref<OrdersConnectionState>('connecting')
 const refreshState = ref<AutoRefreshState>({ refreshing: false, lastCheckedAt: null, hasError: false })
 const refreshLabel = computed(() => {
-  if (!online.value) return 'Offline — updates will resume automatically'
-  if (!visible.value) return 'Auto-refresh paused'
-  if (refreshState.value.hasError) return 'Auto-refresh retrying'
-  return refreshState.value.refreshing ? 'Updating orders…' : 'Auto-refresh on'
+  if (!online.value) return 'Live updates disconnected — Sync available'
+  if (refreshState.value.refreshing) return 'Updating orders…'
+  if (connectionState.value === 'connecting') return 'Connecting to live updates…'
+  if (connectionState.value === 'reconnecting') return 'Reconnecting to live updates…'
+  if (connectionState.value === 'disconnected') return 'Live updates disconnected — Sync available'
+  if (refreshState.value.hasError) return 'Refresh failed — Sync available'
+  return 'Live updates connected'
 })
 const lastChecked = computed(() => refreshState.value.lastCheckedAt === null
   ? ''
@@ -63,8 +68,7 @@ const lastChecked = computed(() => refreshState.value.lastCheckedAt === null
 let mounted = false
 const navigationVisits = new Set<object>()
 const cleanupListeners: Array<() => void> = []
-let ordersEcho: Awaited<ReturnType<typeof getEcho>> = null
-let ordersChannelName: string | null = null
+let stopOrdersSubscription: (() => void) | null = null
 
 const liveRefresh = createAutoRefresh({
   isAvailable: () => mounted && online.value && visible.value,
@@ -162,15 +166,13 @@ onMounted(() => {
 
   try {
     onNotification('orders-index', onOrderNotification, user.id)
-    getEcho()
-      .then((echo) => {
-        if (!mounted || !echo) return
-        ordersEcho = echo
-        ordersChannelName = `orders.${user.id}`
-        echo.private(ordersChannelName)
-          .listen('.order.received', onOrderReceived)
-      })
-      .catch(() => {})
+    stopOrdersSubscription = subscribeToOrders({
+      userId: user.id,
+      getEcho,
+      onOrder: onOrderReceived,
+      onSubscribed: () => liveRefresh.request(),
+      onState: (state) => { connectionState.value = state },
+    })
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
@@ -181,7 +183,7 @@ onUnmounted(() => {
   liveRefresh.stop()
   syncAbortController?.abort()
   offNotification('orders-index')
-  if (ordersEcho && ordersChannelName) ordersEcho.leave(ordersChannelName)
+  stopOrdersSubscription?.()
   cleanupListeners.forEach((remove) => remove())
   navigationVisits.clear()
   document.removeEventListener('visibilitychange', updateAvailability)
@@ -358,7 +360,7 @@ function formatDate(dateString: string | null) {
           <span
             aria-hidden="true"
             class="h-2 w-2 rounded-full"
-            :class="!online || refreshState.hasError ? 'bg-amber-500' : 'bg-green-500'"
+            :class="!online || connectionState !== 'connected' || refreshState.hasError ? 'bg-amber-500' : 'bg-green-500'"
           />
           <span>{{ refreshLabel }}</span>
           <span v-if="lastChecked">· Last checked {{ lastChecked }}</span>

@@ -2,10 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Events\WcOrdersSynced;
 use App\Models\Website;
 use App\Services\WooCommerceOrderSyncService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class SyncWooCommerceOrders extends Command
 {
@@ -112,6 +115,18 @@ class SyncWooCommerceOrders extends Command
         $result['updated'] = $updated;
         if ($result['status'] === 'success') {
             $result['message'] = "Synced {$synced} new WooCommerce order(s); updated {$updated} existing order(s).";
+        }
+
+        // One refresh covers every persisted page, even if a later page failed.
+        if ($synced + $updated > 0) {
+            try {
+                Event::dispatch(new WcOrdersSynced($website));
+            } catch (Throwable $e) {
+                Log::warning('[WooSync] Failed to broadcast order changes', [
+                    'website_id' => $website->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $result;
