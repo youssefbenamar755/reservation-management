@@ -17,8 +17,7 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
     return (int) $user->id === (int) $id;
 });
 
-// Any authenticated user can listen for new WooCommerce orders (to refresh Orders page)
-Broadcast::channel('orders', function ($user) {
-    return $user !== null;
+// Owners and admins receive order changes on their own private channel.
+Broadcast::channel('orders.{id}', function ($user, $id) {
+    return (int) $user->id === (int) $id;
 });
-

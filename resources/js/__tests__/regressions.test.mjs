@@ -24,6 +24,7 @@ function loadModule(content, mocks = {}) {
     console,
     setTimeout,
     clearTimeout,
+    AbortController,
   })
   return module.exports
 }
@@ -306,4 +307,317 @@ test('the default retry timer rejects immediately when navigation aborts the syn
   controller.abort()
   await rejection
   assert.equal(calls, 1)
+})
+
+const { createAutoRefresh, refreshOrdersSnapshot } = loadModule(source('lib/liveOrders.ts'))
+
+function fakeClock() {
+  let time = 0
+  let nextId = 0
+  const timers = new Map()
+  return {
+    now: () => time,
+    setTimer(callback, delay) {
+      const id = ++nextId
+      timers.set(id, { at: time + delay, callback })
+      return id
+    },
+    clearTimer: (id) => timers.delete(id),
+    count: () => timers.size,
+    tick(milliseconds) {
+      const target = time + milliseconds
+      while (true) {
+        const next = [...timers.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+        if (!next || next[1].at > target) break
+        time = next[1].at
+        timers.delete(next[0])
+        next[1].callback()
+      }
+      time = target
+    },
+  }
+}
+
+function autoRefreshFixture() {
+  const clock = fakeClock()
+  const requests = []
+  const states = []
+  let available = true
+  const coordinator = createAutoRefresh({
+    ...clock,
+    isAvailable: () => available,
+    onState: (state) => states.push(state),
+    refresh(request) {
+      const entry = { ...request, cancelled: false }
+      requests.push(entry)
+      return () => {
+        entry.cancelled = true
+        request.complete('cancelled')
+      }
+    },
+  })
+  return { clock, coordinator, requests, states, setAvailable: (value) => { available = value } }
+}
+
+test('automatic refresh coalesces push bursts and queues only one follow-up during a slow request', () => {
+  const { coordinator, clock, requests } = autoRefreshFixture()
+  coordinator.start()
+  coordinator.request()
+  coordinator.request()
+  clock.tick(249)
+  assert.equal(requests.length, 0)
+  clock.tick(1)
+  assert.equal(requests.length, 1)
+  coordinator.request()
+  coordinator.request()
+  clock.tick(30_000)
+  assert.equal(requests.length, 1)
+  requests[0].complete('success')
+  clock.tick(250)
+  assert.equal(requests.length, 2)
+  requests[1].complete('success')
+  clock.tick(9_999)
+  assert.equal(requests.length, 2)
+  clock.tick(1)
+  assert.equal(requests.length, 3)
+})
+
+test('fallback polling waits ten seconds after completion rather than overlapping slow requests', () => {
+  const { coordinator, clock, requests, states } = autoRefreshFixture()
+  coordinator.start()
+  clock.tick(10_000)
+  assert.equal(requests.length, 1)
+  clock.tick(35_000)
+  assert.equal(requests.length, 1)
+  requests[0].complete('success')
+  assert.equal(states.at(-1).lastCheckedAt, 45_000)
+  clock.tick(9_999)
+  assert.equal(requests.length, 1)
+  clock.tick(1)
+  assert.equal(requests.length, 2)
+})
+
+test('navigation cancels the old request and stale callbacks cannot finish its replacement', () => {
+  const { coordinator, clock, requests, states } = autoRefreshFixture()
+  coordinator.start()
+  coordinator.request(0)
+  clock.tick(0)
+  coordinator.suspend()
+  assert.equal(requests[0].cancelled, true)
+  assert.equal(requests[0].isCurrent(), false)
+  coordinator.request()
+  clock.tick(30_000)
+  assert.equal(requests.length, 1)
+  coordinator.resume()
+  clock.tick(0)
+  assert.equal(requests.length, 2)
+  requests[0].complete('success')
+  assert.equal(states.at(-1).refreshing, true)
+  assert.equal(states.at(-1).lastCheckedAt, null)
+  requests[1].complete('success')
+  assert.equal(states.at(-1).refreshing, false)
+})
+
+test('hidden or offline pages stop refreshing and immediately catch up when available again', () => {
+  const { coordinator, clock, requests, setAvailable } = autoRefreshFixture()
+  coordinator.start()
+  clock.tick(10_000)
+  setAvailable(false)
+  coordinator.availabilityChanged()
+  assert.equal(requests[0].cancelled, true)
+  coordinator.request()
+  clock.tick(120_000)
+  assert.equal(requests.length, 1)
+  setAvailable(true)
+  coordinator.availabilityChanged()
+  coordinator.availabilityChanged()
+  clock.tick(0)
+  assert.equal(requests.length, 2)
+})
+
+test('unmount clears polling and invalidates responses even if cancellation completes late', () => {
+  const { coordinator, clock, requests } = autoRefreshFixture()
+  coordinator.start()
+  clock.tick(10_000)
+  coordinator.stop()
+  requests[0].complete('success')
+  coordinator.request()
+  coordinator.resume()
+  clock.tick(120_000)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].isCurrent(), false)
+  assert.equal(clock.count(), 0)
+})
+
+test('failed automatic checks back off and a success restores the regular interval', () => {
+  const { coordinator, clock, requests, states } = autoRefreshFixture()
+  coordinator.start()
+  clock.tick(10_000)
+  requests[0].complete('error')
+  assert.equal(states.at(-1).hasError, true)
+  assert.equal(states.at(-1).lastCheckedAt, null)
+  clock.tick(19_999)
+  assert.equal(requests.length, 1)
+  clock.tick(1)
+  requests[1].complete('success')
+  assert.equal(states.at(-1).hasError, false)
+  clock.tick(10_000)
+  assert.equal(requests.length, 3)
+})
+
+const ordersResponse = (orders = { data: [{ id: 42 }], current_page: 3, total: 60 }) => ({
+  ok: true, status: 200, json: async () => ({ orders }),
+})
+
+test('automatic orders fetch retains the full current filters and pagination without an Inertia request', async () => {
+  const url = 'https://example.test/orders?website_id=2&status=processing&search=Alice&page=3'
+  const controller = new AbortController()
+  let applied = null
+  const result = await refreshOrdersSnapshot({
+    getUrl: () => url,
+    isCurrent: () => true,
+    signal: controller.signal,
+    fetch: async (requestUrl, options) => {
+      assert.equal(requestUrl, url)
+      assert.equal(options.headers.Accept, 'application/json')
+      assert.equal(options.headers['X-Inertia'], undefined)
+      assert.equal(options.signal.aborted, false)
+      assert.equal(options.cache, 'no-store')
+      return ordersResponse()
+    },
+    apply: async (orders, isCurrent) => {
+      assert.equal(isCurrent(), true)
+      applied = orders
+      return true
+    },
+  })
+  assert.equal(result, 'success')
+  assert.equal(applied.current_page, 3)
+})
+
+test('a response for old filters is discarded even when its request ignored cancellation', async () => {
+  let url = 'https://example.test/orders?search=old&page=2'
+  const ready = deferred()
+  let applies = 0
+  const task = refreshOrdersSnapshot({
+    getUrl: () => url,
+    isCurrent: () => true,
+    signal: new AbortController().signal,
+    fetch: async () => ready.promise,
+    apply: async () => { applies++; return true },
+  })
+  url = 'https://example.test/orders?search=new&page=1'
+  ready.resolve(ordersResponse())
+  assert.equal(await task, 'cancelled')
+  assert.equal(applies, 0)
+})
+
+test('the deferred prop updater rechecks navigation generation before applying an orders snapshot', async () => {
+  let current = true
+  const queued = deferred()
+  let applyGuard
+  let replaced = false
+  const task = refreshOrdersSnapshot({
+    getUrl: () => 'https://example.test/orders?page=3',
+    isCurrent: () => current,
+    signal: new AbortController().signal,
+    fetch: async () => ordersResponse(),
+    apply: async (_orders, guard) => {
+      applyGuard = guard
+      await queued.promise
+      replaced = guard()
+      return replaced
+    },
+  })
+  await flushPromises()
+  assert.equal(applyGuard(), true)
+  current = false
+  queued.resolve()
+  assert.equal(await task, 'cancelled')
+  assert.equal(replaced, false)
+})
+
+test('invalid or failed automatic responses never replace the existing order table', async () => {
+  for (const response of [
+    { ok: false, status: 500 },
+    ordersResponse({ data: [], current_page: 0, total: 0 }),
+    { ok: true, status: 200, json: async () => { throw new Error('HTML login page') } },
+  ]) {
+    let applies = 0
+    const result = await refreshOrdersSnapshot({
+      getUrl: () => 'https://example.test/orders',
+      isCurrent: () => true,
+      signal: new AbortController().signal,
+      fetch: async () => response,
+      apply: async () => { applies++; return true },
+    })
+    assert.equal(result, 'error')
+    assert.equal(applies, 0)
+  }
+})
+
+test('a stalled orders fetch times out, backs off, and recovers on the next automatic check', async () => {
+  const clock = fakeClock()
+  const states = []
+  let calls = 0
+  const coordinator = createAutoRefresh({
+    ...clock,
+    isAvailable: () => true,
+    onState: (state) => states.push(state),
+    refresh({ isCurrent, complete }) {
+      const controller = new AbortController()
+      void refreshOrdersSnapshot({
+        ...clock,
+        getUrl: () => 'https://example.test/orders?page=2',
+        isCurrent,
+        signal: controller.signal,
+        fetch: async (_url, { signal }) => {
+          calls++
+          if (calls > 1) return ordersResponse()
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('Aborted stalled HTTP request')), { once: true })
+          })
+        },
+        apply: async (_orders, current) => current(),
+      }).then(complete)
+      return () => controller.abort()
+    },
+  })
+  coordinator.start()
+  clock.tick(10_000)
+  assert.equal(calls, 1)
+  clock.tick(20_000)
+  await flushPromises()
+  assert.equal(states.at(-1).refreshing, false)
+  assert.equal(states.at(-1).hasError, true)
+  clock.tick(20_000)
+  await flushPromises()
+  assert.equal(calls, 2)
+  assert.equal(states.at(-1).hasError, false)
+  assert.equal(states.at(-1).lastCheckedAt, 50_000)
+  coordinator.stop()
+  assert.equal(clock.count(), 0)
+})
+
+test('navigation abort propagates to the HTTP request and clears its deadline without a retry error', async () => {
+  const clock = fakeClock()
+  const controller = new AbortController()
+  let fetchSignal
+  const task = refreshOrdersSnapshot({
+    ...clock,
+    getUrl: () => 'https://example.test/orders',
+    isCurrent: () => true,
+    signal: controller.signal,
+    fetch: async (_url, { signal }) => {
+      fetchSignal = signal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('Navigation aborted')), { once: true })
+      })
+    },
+    apply: async () => { assert.fail('Aborted data must not be applied') },
+  })
+  controller.abort()
+  assert.equal(await task, 'cancelled')
+  assert.equal(fetchSignal.aborted, true)
+  assert.equal(clock.count(), 0)
 })

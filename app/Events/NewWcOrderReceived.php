@@ -2,6 +2,7 @@
 
 namespace App\Events;
 
+use App\Models\User;
 use App\Models\WcOrder;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
@@ -24,9 +25,14 @@ class NewWcOrderReceived implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        return [
-            new PrivateChannel('orders'),
-        ];
+        $ownerId = $this->order->website?->user_id;
+
+        return User::where('is_admin', true)->pluck('id')
+            ->when($ownerId, fn ($ids) => $ids->push($ownerId))
+            ->unique()
+            ->map(fn ($id) => new PrivateChannel('orders.'.$id))
+            ->values()
+            ->all();
     }
 
     /**
