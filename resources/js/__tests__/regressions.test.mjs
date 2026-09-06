@@ -376,25 +376,27 @@ test('automatic refresh coalesces push bursts and queues only one follow-up duri
   clock.tick(250)
   assert.equal(requests.length, 2)
   requests[1].complete('success')
-  clock.tick(9_999)
+  clock.tick(600_000)
   assert.equal(requests.length, 2)
-  clock.tick(1)
-  assert.equal(requests.length, 3)
+  assert.equal(clock.count(), 0)
 })
 
-test('fallback polling waits ten seconds after completion rather than overlapping slow requests', () => {
+test('idle and successfully refreshed pages make no periodic requests over several minutes', () => {
   const { coordinator, clock, requests, states } = autoRefreshFixture()
   coordinator.start()
-  clock.tick(10_000)
+  clock.tick(300_000)
+  assert.equal(requests.length, 0)
+  assert.equal(clock.count(), 0)
+  coordinator.request(0)
+  clock.tick(0)
   assert.equal(requests.length, 1)
   clock.tick(35_000)
   assert.equal(requests.length, 1)
   requests[0].complete('success')
-  assert.equal(states.at(-1).lastCheckedAt, 45_000)
-  clock.tick(9_999)
+  assert.equal(states.at(-1).lastCheckedAt, 335_000)
+  clock.tick(600_000)
   assert.equal(requests.length, 1)
-  clock.tick(1)
-  assert.equal(requests.length, 2)
+  assert.equal(clock.count(), 0)
 })
 
 test('navigation cancels the old request and stale callbacks cannot finish its replacement', () => {
@@ -409,7 +411,7 @@ test('navigation cancels the old request and stale callbacks cannot finish its r
   clock.tick(30_000)
   assert.equal(requests.length, 1)
   coordinator.resume()
-  clock.tick(0)
+  clock.tick(250)
   assert.equal(requests.length, 2)
   requests[0].complete('success')
   assert.equal(states.at(-1).refreshing, true)
@@ -421,7 +423,8 @@ test('navigation cancels the old request and stale callbacks cannot finish its r
 test('hidden or offline pages stop refreshing and immediately catch up when available again', () => {
   const { coordinator, clock, requests, setAvailable } = autoRefreshFixture()
   coordinator.start()
-  clock.tick(10_000)
+  coordinator.request(0)
+  clock.tick(0)
   setAvailable(false)
   coordinator.availabilityChanged()
   assert.equal(requests[0].cancelled, true)
@@ -431,14 +434,15 @@ test('hidden or offline pages stop refreshing and immediately catch up when avai
   setAvailable(true)
   coordinator.availabilityChanged()
   coordinator.availabilityChanged()
-  clock.tick(0)
+  clock.tick(250)
   assert.equal(requests.length, 2)
 })
 
-test('unmount clears polling and invalidates responses even if cancellation completes late', () => {
+test('unmount clears pending refreshes and invalidates responses even if cancellation completes late', () => {
   const { coordinator, clock, requests } = autoRefreshFixture()
   coordinator.start()
-  clock.tick(10_000)
+  coordinator.request(0)
+  clock.tick(0)
   coordinator.stop()
   requests[0].complete('success')
   coordinator.request()
@@ -449,20 +453,32 @@ test('unmount clears polling and invalidates responses even if cancellation comp
   assert.equal(clock.count(), 0)
 })
 
-test('failed automatic checks back off and a success restores the regular interval', () => {
+test('failed checks retry at most three times and then wait for a new external trigger', () => {
   const { coordinator, clock, requests, states } = autoRefreshFixture()
   coordinator.start()
-  clock.tick(10_000)
+  coordinator.request(0)
+  clock.tick(0)
   requests[0].complete('error')
   assert.equal(states.at(-1).hasError, true)
   assert.equal(states.at(-1).lastCheckedAt, null)
-  clock.tick(19_999)
+  clock.tick(1_999)
   assert.equal(requests.length, 1)
   clock.tick(1)
-  requests[1].complete('success')
+  requests[1].complete('error')
+  clock.tick(4_000)
+  requests[2].complete('error')
+  clock.tick(8_000)
+  requests[3].complete('error')
+  clock.tick(600_000)
+  assert.equal(requests.length, 4)
+  assert.equal(clock.count(), 0)
+  coordinator.availabilityChanged() // A new focus/online event permits another attempt.
+  clock.tick(250)
+  assert.equal(requests.length, 5)
+  requests[4].complete('success')
   assert.equal(states.at(-1).hasError, false)
-  clock.tick(10_000)
-  assert.equal(requests.length, 3)
+  clock.tick(600_000)
+  assert.equal(requests.length, 5)
 })
 
 const ordersResponse = (orders = { data: [{ id: 42 }], current_page: 3, total: 60 }) => ({
@@ -556,7 +572,7 @@ test('invalid or failed automatic responses never replace the existing order tab
   }
 })
 
-test('a stalled orders fetch times out, backs off, and recovers on the next automatic check', async () => {
+test('a stalled orders fetch times out and recovers on its bounded retry without starting polling', async () => {
   const clock = fakeClock()
   const states = []
   let calls = 0
@@ -584,19 +600,195 @@ test('a stalled orders fetch times out, backs off, and recovers on the next auto
     },
   })
   coordinator.start()
-  clock.tick(10_000)
+  coordinator.request(0)
+  clock.tick(0)
   assert.equal(calls, 1)
   clock.tick(20_000)
   await flushPromises()
   assert.equal(states.at(-1).refreshing, false)
   assert.equal(states.at(-1).hasError, true)
-  clock.tick(20_000)
+  clock.tick(2_000)
   await flushPromises()
   assert.equal(calls, 2)
   assert.equal(states.at(-1).hasError, false)
-  assert.equal(states.at(-1).lastCheckedAt, 50_000)
+  assert.equal(states.at(-1).lastCheckedAt, 22_000)
+  clock.tick(600_000)
+  assert.equal(calls, 2)
   coordinator.stop()
   assert.equal(clock.count(), 0)
+})
+
+const { subscribeToOrders } = loadModule(source('lib/ordersPush.ts'))
+
+function eventSource(extra = {}) {
+  const handlers = new Map()
+  return {
+    ...extra,
+    bind(event, handler) {
+      if (!handlers.has(event)) handlers.set(event, new Set())
+      handlers.get(event).add(handler)
+    },
+    unbind(event, handler) { handlers.get(event)?.delete(handler) },
+    emit(event, value) { handlers.get(event)?.forEach((handler) => handler(value)) },
+    callbacks: (event) => [...(handlers.get(event) ?? [])],
+    count: () => [...handlers.values()].reduce((count, values) => count + values.size, 0),
+  }
+}
+
+function pushEchoFixture() {
+  const connection = eventSource({ state: 'connected' })
+  const subscription = eventSource({ subscribed: false })
+  const changes = eventSource()
+  const names = []
+  const departures = []
+  const echo = {
+    connector: { pusher: { connection } },
+    private(name) {
+      names.push(name)
+      return { subscription, listen: changes.bind, stopListening: changes.unbind }
+    },
+    leave: (name) => departures.push(name),
+  }
+  return { echo, connection, subscription, changes, names, departures }
+}
+
+test('live status requires confirmed private subscription and changes on connection or authorization failure', async () => {
+  const { echo, connection, subscription } = pushEchoFixture()
+  const states = []
+  let checks = 0
+  const stop = subscribeToOrders({
+    userId: 7,
+    getEcho: async () => echo,
+    onState: (state) => states.push(state),
+    onSubscribed: () => checks++,
+    onOrder: () => {},
+  })
+  await flushPromises()
+  assert.equal(states.at(-1), 'connecting')
+  assert.equal(checks, 0)
+  connection.emit('state_change', { current: 'connected' })
+  assert.equal(states.at(-1), 'connecting')
+  subscription.emit('pusher:subscription_succeeded')
+  assert.equal(states.at(-1), 'connected')
+  assert.equal(checks, 1)
+  connection.emit('state_change', { current: 'unavailable' })
+  assert.equal(states.at(-1), 'disconnected')
+  connection.emit('state_change', { current: 'connecting' })
+  assert.equal(states.at(-1), 'reconnecting')
+  connection.emit('state_change', { current: 'connected' })
+  assert.equal(states.at(-1), 'reconnecting')
+  subscription.emit('pusher:subscription_succeeded')
+  assert.equal(states.at(-1), 'connected')
+  assert.equal(checks, 2)
+  subscription.emit('pusher:subscription_error')
+  assert.equal(states.at(-1), 'disconnected')
+  stop()
+})
+
+test('subscription, push, and focus refreshes coalesce and resubscription recovers a missed push', async () => {
+  const { echo, connection, subscription, changes } = pushEchoFixture()
+  const { coordinator, clock, requests } = autoRefreshFixture()
+  coordinator.start()
+  const stop = subscribeToOrders({
+    userId: 7,
+    getEcho: async () => echo,
+    onState: () => {},
+    onSubscribed: () => coordinator.request(),
+    onOrder: () => coordinator.request(),
+  })
+  await flushPromises()
+  subscription.emit('pusher:subscription_succeeded')
+  changes.emit('.order.received', { website_id: 2 })
+  coordinator.availabilityChanged() // Focus at the same time as subscription/push.
+  clock.tick(250)
+  assert.equal(requests.length, 1)
+  requests[0].complete('success')
+  clock.tick(600_000)
+  assert.equal(requests.length, 1)
+
+  connection.emit('state_change', { current: 'disconnected' })
+  connection.emit('state_change', { current: 'connected' })
+  clock.tick(5_000)
+  assert.equal(requests.length, 1)
+  // No order event was delivered while disconnected; confirmation triggers a check.
+  subscription.emit('pusher:subscription_succeeded')
+  clock.tick(250)
+  assert.equal(requests.length, 2)
+  requests[1].complete('success')
+  clock.tick(600_000)
+  assert.equal(requests.length, 2)
+  assert.equal(clock.count(), 0)
+  stop()
+  coordinator.stop()
+})
+
+test('push cleanup removes exact subscription/connection handlers and ignores late callbacks', async () => {
+  const { echo, connection, subscription, changes, names, departures } = pushEchoFixture()
+  let notifications = 0
+  let checks = 0
+  const states = []
+  const stop = subscribeToOrders({
+    userId: 7,
+    getEcho: async () => echo,
+    onState: (state) => states.push(state),
+    onSubscribed: () => checks++,
+    onOrder: () => notifications++,
+  })
+  await flushPromises()
+  const lateSubscribed = subscription.callbacks('pusher:subscription_succeeded')[0]
+  const lateOrder = changes.callbacks('.order.received')[0]
+  assert.deepEqual(names, ['orders.7'])
+  stop()
+  const stateCount = states.length
+  lateSubscribed()
+  lateOrder({ website_id: 2 })
+  connection.emit('state_change', { current: 'connected' })
+  assert.equal(checks, 0)
+  assert.equal(notifications, 0)
+  assert.equal(states.length, stateCount)
+  assert.equal(connection.count(), 0)
+  assert.equal(subscription.count(), 0)
+  assert.equal(changes.count(), 0)
+  assert.deepEqual(departures, ['orders.7'])
+})
+
+test('delayed Echo initialization never subscribes after unmount', async () => {
+  const ready = deferred()
+  const { echo, names, departures } = pushEchoFixture()
+  const stop = subscribeToOrders({
+    userId: 7,
+    getEcho: () => ready.promise,
+    onState: () => {},
+    onSubscribed: () => assert.fail('Unmounted page must not refresh'),
+    onOrder: () => assert.fail('Unmounted page must not receive orders'),
+  })
+  stop()
+  ready.resolve(echo)
+  await flushPromises()
+  assert.deepEqual(names, [])
+  assert.deepEqual(departures, [])
+})
+
+test('an already-authorized channel checks once and unavailable Echo reports disconnected', async () => {
+  const { echo, subscription } = pushEchoFixture()
+  subscription.subscribed = true
+  const states = []
+  let checks = 0
+  const stop = subscribeToOrders({ userId: 7, getEcho: async () => echo,
+    onState: (state) => states.push(state), onSubscribed: () => checks++, onOrder: () => {} })
+  await flushPromises()
+  assert.equal(states.at(-1), 'connected')
+  assert.equal(checks, 1)
+  stop()
+  subscribeToOrders({ userId: 7, getEcho: async () => null,
+    onState: (state) => states.push(state), onSubscribed: () => assert.fail('No subscription'), onOrder: () => {} })()
+  await flushPromises()
+  // Disposed handlers remain silent; a mounted unavailable connection reports failure.
+  const stopMissing = subscribeToOrders({ userId: 7, getEcho: async () => null,
+    onState: (state) => states.push(state), onSubscribed: () => assert.fail('No subscription'), onOrder: () => {} })
+  await flushPromises()
+  assert.equal(states.at(-1), 'disconnected')
+  stopMissing()
 })
 
 test('navigation abort propagates to the HTTP request and clears its deadline without a retry error', async () => {

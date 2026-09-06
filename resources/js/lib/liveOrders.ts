@@ -13,18 +13,18 @@ interface RefreshRequest {
 
 type Timer = ReturnType<typeof setTimeout>
 
-/** One request at a time, with push bursts coalesced and polling after completion. */
+/** Event-driven refreshes only: coalesce bursts and retry failures at most three times. */
 export function createAutoRefresh(options: {
   refresh: (request: RefreshRequest) => (() => void)
   isAvailable: () => boolean
   onState: (state: AutoRefreshState) => void
-  interval?: number
+  retryDelay?: number
   coalesceDelay?: number
   now?: () => number
   setTimer?: (callback: () => void, delay: number) => Timer
   clearTimer?: (timer: Timer) => void
 }) {
-  const interval = options.interval ?? 10_000
+  const retryDelay = options.retryDelay ?? 2_000
   const coalesceDelay = options.coalesceDelay ?? 250
   const now = options.now ?? Date.now
   const setTimer = options.setTimer ?? setTimeout
@@ -35,7 +35,7 @@ export function createAutoRefresh(options: {
   let pending = false
   let failures = 0
   let timer: Timer | null = null
-  let timerKind: 'poll' | 'event' | null = null
+  let timerKind: 'retry' | 'event' | null = null
   let active: { cancel?: () => void } | null = null
 
   const emit = () => options.onState({ ...state })
@@ -55,7 +55,7 @@ export function createAutoRefresh(options: {
     emit()
   }
 
-  function schedule(delay: number, kind: 'poll' | 'event') {
+  function schedule(delay: number, kind: 'retry' | 'event') {
     clearScheduled()
     if (!available()) return
     timerKind = kind
@@ -86,8 +86,11 @@ export function createAutoRefresh(options: {
         state.hasError = true
       }
       emit()
-      const retryDelay = Math.min(interval * (2 ** failures), 60_000)
-      schedule(pending && outcome !== 'error' ? coalesceDelay : retryDelay, pending ? 'event' : 'poll')
+      if (outcome === 'error') {
+        if (failures <= 3) schedule(Math.min(retryDelay * (2 ** (failures - 1)), 30_000), 'retry')
+      } else if (pending) {
+        schedule(coalesceDelay, 'event')
+      }
     }
 
     try {
@@ -99,6 +102,8 @@ export function createAutoRefresh(options: {
   }
 
   function request(delay = coalesceDelay) {
+    // A new push/focus/reconnect/manual action starts a fresh bounded attempt.
+    failures = 0
     pending = true
     if (!available() || active || timerKind === 'event') return
     schedule(delay, 'event')
@@ -109,7 +114,6 @@ export function createAutoRefresh(options: {
       if (started) return
       started = true
       emit()
-      schedule(interval, 'poll')
     },
     request,
     suspend() {
@@ -120,7 +124,7 @@ export function createAutoRefresh(options: {
     },
     resume() {
       suspended = false
-      request(0)
+      request()
     },
     availabilityChanged() {
       if (!options.isAvailable()) {
@@ -128,7 +132,7 @@ export function createAutoRefresh(options: {
         clearScheduled()
         cancelActive()
       } else {
-        request(0)
+        request()
       }
     },
     stop() {

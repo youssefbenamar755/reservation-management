@@ -266,14 +266,14 @@ test('orders JSON refresh preserves website status search and pagination filters
     Http::assertNothingSent();
 });
 
-test('automatic order reconciliation runs each minute and bounds stale overlap locks', function () {
+test('backup order reconciliation runs every five minutes and bounds stale overlap locks', function () {
     // Listing boots the real console routes without executing remote reconciliation.
     $this->artisan('schedule:list')->assertExitCode(0);
     $event = collect(Schedule::events())
         ->first(fn ($event) => str_contains($event->command ?? '', 'orders:sync-woocommerce'));
 
     expect($event)->not->toBeNull()
-        ->and($event->expression)->toBe('* * * * *')
+        ->and($event->expression)->toBe('*/5 * * * *')
         ->and($event->withoutOverlapping)->toBeTrue()
         ->and($event->expiresAt)->toBe(10)
         ->and($event->runInBackground)->toBeTrue();
