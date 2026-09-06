@@ -97,7 +97,7 @@ const chartOptions = computed<ChartOptions<'bar'>>(() => {
         },
         ticks: {
           color: textColor,
-          stepSize: 1,
+          precision: 0,
         },
       },
     },
