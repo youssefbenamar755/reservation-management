@@ -97,7 +97,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
           color: gridColor,
         },
         ticks: {
-          stepSize: 1,
+          precision: 0,
           color: textColor,
         },
       },

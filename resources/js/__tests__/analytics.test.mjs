@@ -92,3 +92,28 @@ test('Analytics charts keep complete data and draw without the default one-secon
     assert.equal(state.chartData.value.datasets[0].data.length, 2, name)
   }
 })
+
+test('count charts generate a short integer axis for both small and large totals without warnings', (t) => {
+  const { LinearScale } = require('chart.js')
+  const warnings = t.mock.method(console, 'warn', () => {})
+  for (const name of ['OrdersChart', 'BarChart']) {
+    const component = loadSetup(`components/charts/${name}.vue`)
+    const state = component.setup({ data: [], labelKey: 'name', valueKey: 'count' }, { expose() {} })
+    for (const maximum of [3, 1532, 1551, 25000]) {
+      const scale = new LinearScale({ id: 'y', type: 'linear', chart: {}, ctx: {} })
+      scale.options = { axis: 'y', bounds: 'ticks', ...state.chartOptions.value.scales.y }
+      scale.min = 0
+      scale.max = maximum
+      scale.height = 250
+      // Only font/canvas measurements are replaced; Chart.js chooses and builds the actual ticks.
+      scale._resolveTickFontOptions = () => ({ size: 12, lineHeight: 14 })
+      scale._maxDigits = () => 20
+      const ticks = scale.buildTicks()
+      assert.ok(ticks.length >= 2 && ticks.length <= 11, `${name}: ${maximum} orders produced ${ticks.length} ticks`)
+      assert.ok(ticks.every((tick) => Number.isInteger(tick.value)), `${name}: fractional count label`)
+      assert.equal(ticks[0].value, 0)
+      assert.ok(ticks.at(-1).value >= maximum)
+    }
+  }
+  assert.equal(warnings.mock.calls.length, 0)
+})
