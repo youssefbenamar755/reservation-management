@@ -2,11 +2,10 @@
 
 use App\Jobs\ProcessFluentWebhookEvent;
 use App\Models\FfSubmission;
-use App\Models\Website;
 use App\Models\WebhookEvent;
+use App\Models\Website;
 use App\Services\FluentFormSchemaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
@@ -18,8 +17,9 @@ test('processes fluent webhook event with array payload and extracts payment dat
     app()->instance(FluentFormSchemaService::class, $mock);
 
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test Website',
-        'slug' => 'test-website-' . uniqid(),
+        'slug' => 'test-website-'.uniqid(),
         'base_url' => 'https://test.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -90,8 +90,9 @@ test('extracts payment amount from order items formatted_line_total when payment
     app()->instance(FluentFormSchemaService::class, $mock);
 
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test Website 2',
-        'slug' => 'test-website-2-' . uniqid(),
+        'slug' => 'test-website-2-'.uniqid(),
         'base_url' => 'https://test2.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -148,8 +149,9 @@ test('handles payload that is already an object (not wrapped in array)', functio
     app()->instance(FluentFormSchemaService::class, $mock);
 
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test Website 3',
-        'slug' => 'test-website-3-' . uniqid(),
+        'slug' => 'test-website-3-'.uniqid(),
         'base_url' => 'https://test3.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -199,8 +201,9 @@ test('handles missing payment data gracefully', function () {
     app()->instance(FluentFormSchemaService::class, $mock);
 
     $website = Website::create([
+        'user_id' => \App\Models\User::factory()->create()->id,
         'name' => 'Test Website 4',
-        'slug' => 'test-website-4-' . uniqid(),
+        'slug' => 'test-website-4-'.uniqid(),
         'base_url' => 'https://test4.example.com',
         'status' => 'active',
         'timezone' => 'UTC',
@@ -243,4 +246,3 @@ test('handles missing payment data gracefully', function () {
     expect($submission->payment_status)->toBeNull();
     expect($submission->amount)->toBeNull();
 });
-

@@ -7,17 +7,18 @@ use Illuminate\Database\Eloquent\Model;
 class Website extends Model
 {
     protected $fillable = [
-        'user_id','name','slug','base_url',
-        'wc_consumer_key','wc_consumer_secret','wc_webhook_secret',
-        'ff_api_key','ff_username','ff_app_password','webhook_secret',
-        'timezone','status',
-        'last_sync_at','last_webhook_at',
+        'user_id', 'name', 'slug', 'base_url',
+        'wc_consumer_key', 'wc_consumer_secret', 'wc_webhook_secret',
+        'ff_api_key', 'ff_username', 'ff_app_password', 'webhook_secret',
+        'timezone', 'status',
+        'last_sync_at', 'last_webhook_at', 'wc_orders_synced_at', 'wc_orders_sync_state',
     ];
 
     /**
      * Never expose credentials / secrets in JSON (e.g. Inertia page props).
      */
     protected $hidden = [
+        'wc_orders_sync_state',
         'wc_consumer_key',
         'wc_consumer_secret',
         'wc_webhook_secret',
@@ -36,6 +37,8 @@ class Website extends Model
         'ff_app_password' => 'encrypted',
         'webhook_secret' => 'encrypted',
         'last_sync_at' => 'datetime',
+        'wc_orders_synced_at' => 'datetime',
+        'wc_orders_sync_state' => 'array',
         'last_webhook_at' => 'datetime',
     ];
 

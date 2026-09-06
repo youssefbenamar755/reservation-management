@@ -15,12 +15,13 @@ use Illuminate\Support\Collection;
 class CustomersController extends Controller
 {
     /**
-     * Get unique countries from all orders
+     * Get unique countries from the websites this user can access.
      */
-    private function getUniqueCountries(): array
+    private function getUniqueCountries(array $websiteIds): array
     {
         $allCountries = [];
         WcOrder::whereNotNull('customer_email')
+            ->whereIn('website_id', $websiteIds)
             ->whereNotNull('payload')
             ->select('payload')
             ->chunk(100, function ($orders) use (&$allCountries) {
@@ -114,10 +115,11 @@ class CustomersController extends Controller
     /**
      * Get country for a customer (most frequent or first order country)
      */
-    private function getCustomerCountry(string $email): ?string
+    private function getCustomerCountry(string $email, array $websiteIds): ?string
     {
         // Get all orders for this customer
         $orders = WcOrder::where('customer_email', $email)
+            ->whereIn('website_id', $websiteIds)
             ->whereNotNull('payload')
             ->select('payload')
             ->get();
@@ -142,6 +144,14 @@ class CustomersController extends Controller
 
     public function index(Request $request)
     {
+        $user = $request->user();
+        $websites = Website::query()
+            ->when(! $user->is_admin, fn ($query) => $query->where('user_id', $user->id))
+            ->select('id', 'name')
+            ->orderBy('name')
+            ->get();
+        $userWebsiteIds = $websites->pluck('id')->all();
+
         // Parse date range filters
         $startDate = $request->input('start_date') 
             ? Carbon::parse($request->input('start_date'))->startOfDay()
@@ -153,6 +163,7 @@ class CustomersController extends Controller
 
         // Build base query for filtering orders
         $orderQuery = WcOrder::query()
+            ->whereIn('website_id', $userWebsiteIds)
             ->whereNotNull('customer_email')
             ->where('customer_email', '!=', '');
 
@@ -197,7 +208,7 @@ class CustomersController extends Controller
             
             if (empty($countryOrderIds)) {
                 // No orders match country filter
-                $uniqueCountries = $this->getUniqueCountries();
+                $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
                 
                 return Inertia::render('Customers/Index', [
                     'customers' => [
@@ -210,7 +221,7 @@ class CustomersController extends Controller
                             'total' => 0,
                         ],
                     ],
-                    'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
+                    'websites' => $websites->toArray(),
                     'countries' => $uniqueCountries,
                     'filters' => [
                         'start_date' => $startDate?->format('Y-m-d'),
@@ -238,7 +249,7 @@ class CustomersController extends Controller
 
         if (empty($customerEmails)) {
             // Get unique countries for filter dropdown
-            $uniqueCountries = $this->getUniqueCountries();
+            $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
             
             return Inertia::render('Customers/Index', [
                 'customers' => [
@@ -251,7 +262,7 @@ class CustomersController extends Controller
                         'total' => 0,
                     ],
                 ],
-                'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
+                'websites' => $websites->toArray(),
                 'countries' => $uniqueCountries,
                 'filters' => [
                     'start_date' => $startDate?->format('Y-m-d'),
@@ -268,6 +279,7 @@ class CustomersController extends Controller
 
         // Build aggregated customer query
         $customerQuery = WcOrder::query()
+            ->whereIn('website_id', $userWebsiteIds)
             ->select([
                 'customer_email',
                 DB::raw('COUNT(*) as orders_count'),
@@ -303,7 +315,7 @@ class CustomersController extends Controller
         $allCustomers = $customerQuery->get();
 
         // Transform results to include additional data
-        $transformedCustomers = $allCustomers->map(function ($customer) {
+        $transformedCustomers = $allCustomers->map(function ($customer) use ($userWebsiteIds) {
             $email = $customer->customer_email;
             
             // Get website names
@@ -321,7 +333,7 @@ class CustomersController extends Controller
             $aov = $ordersCount > 0 ? ($totalSpent / $ordersCount) : 0;
 
             // Get country (most frequent or first order)
-            $country = $this->getCustomerCountry($email);
+            $country = $this->getCustomerCountry($email, $userWebsiteIds);
 
             // Handle dates - they come as strings from DB::raw(), so parse them
             $firstOrderAt = $customer->first_order_at 
@@ -369,11 +381,11 @@ class CustomersController extends Controller
         $paginatedCustomers->withQueryString();
 
         // Get unique countries for filter dropdown
-        $uniqueCountries = $this->getUniqueCountries();
+        $uniqueCountries = $this->getUniqueCountries($userWebsiteIds);
 
         return Inertia::render('Customers/Index', [
             'customers' => $paginatedCustomers,
-            'websites' => Website::select('id', 'name')->orderBy('name')->get()->toArray(),
+            'websites' => $websites->toArray(),
             'countries' => $uniqueCountries,
             'filters' => [
                 'start_date' => $startDate?->format('Y-m-d'),
@@ -392,11 +404,18 @@ class CustomersController extends Controller
 
     public function show(Request $request, string $email)
     {
+        $user = $request->user();
+        $userWebsiteIds = Website::query()
+            ->when(! $user->is_admin, fn ($query) => $query->where('user_id', $user->id))
+            ->pluck('id')
+            ->all();
+
         // Decode email if needed
         $email = urldecode($email);
 
         // Get all orders for this customer
         $ordersQuery = WcOrder::query()
+            ->whereIn('website_id', $userWebsiteIds)
             ->with('website')
             ->where('customer_email', $email);
 
@@ -431,7 +450,7 @@ class CustomersController extends Controller
             ->toArray();
 
         // Get country (most frequent)
-        $country = $this->getCustomerCountry($email);
+        $country = $this->getCustomerCountry($email, $userWebsiteIds);
 
         // Revenue over time (grouped by date)
         $revenueOverTime = $paidOrders
@@ -526,4 +545,3 @@ class CustomersController extends Controller
         ]);
     }
 }
-

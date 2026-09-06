@@ -36,7 +36,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('websites.test-fluent-forms');
     
     Route::post('websites/{website}/sync-woocommerce-orders', [WebsiteController::class, 'syncWooCommerceOrders'])
-        ->middleware('throttle:sync')
+        ->middleware('throttle:sync-pages')
         ->name('websites.sync-woocommerce-orders');
     Route::post('websites/{website}/sync-fluent-form', [WebsiteController::class, 'syncFluentForm'])
         ->middleware('throttle:sync')

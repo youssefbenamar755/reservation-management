@@ -4,9 +4,9 @@ import { type BreadcrumbItem } from '@/types'
 import { Head, router, usePage } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { DownloadCloud, ChevronLeft, ChevronRight, Trash2 } from 'lucide-vue-next'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
-import { getEcho } from '@/lib/echo'
+import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import {
   Dialog,
   DialogContent,
@@ -46,9 +46,7 @@ const deletingFormId = ref<string | null>(null)
 const page = usePage()
 
 // Real-time: auto-reload the submissions table when a new form submission arrives
-let echoChannel: any = null
-let echoInstance: any = null
-let subscribedChannelName: string | null = null
+const { onNotification, offNotification } = useEchoNotifications()
 const onSubmissionNotification = (data: any) => {
   if (data?.type === 'form_submission') {
     router.reload({ only: ['forms'] })
@@ -58,28 +56,10 @@ const onSubmissionNotification = (data: any) => {
 onMounted(() => {
   const user = (page.props as any).auth?.user
   if (!user) return
-  const name = `App.Models.User.${user.id}`
-  getEcho()
-    .then((instance) => {
-      if (!instance) return
-      echoInstance = instance
-      subscribedChannelName = name
-      echoChannel = instance.private(name)
-      echoChannel.listen('.notification', onSubmissionNotification)
-    })
-    .catch((e) => console.error('Echo setup failed:', e))
+  onNotification('submissions-index', onSubmissionNotification, user.id)
 })
 onUnmounted(() => {
-  if (echoChannel) {
-    try {
-      echoChannel.stopListening('.notification', onSubmissionNotification)
-    } catch {}
-  }
-  if (echoInstance && subscribedChannelName) {
-    try {
-      echoInstance.leave(subscribedChannelName)
-    } catch {}
-  }
+  offNotification('submissions-index')
 })
 
 // Watch for website selection to load forms

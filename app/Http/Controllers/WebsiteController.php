@@ -282,46 +282,26 @@ class WebsiteController extends Controller
         $perPage = (int) ($request->input('per_page', 50));
         $result  = $this->syncService->syncForWebsite($website, $perPage);
 
-        return back()->with($result['status'], $result['message']);
+        // The browser requests one page at a time and continues from saved progress.
+        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+            return response()->json($result);
+        }
+
+        $flashType = $result['status'] === 'success' ? 'success' : 'error';
+        $message = $result['status'] === 'partial'
+            ? 'Sync is still in progress. Use Sync orders on the Orders page to continue.'
+            : $result['message'];
+
+        return back()->with($flashType, $message);
     }
 
     public function syncAllWooCommerceOrders(Request $request)
     {
-        $user     = auth()->user();
-        $websites = Website::where('status', 'active')
-            ->when(! $user->is_admin, fn ($q) => $q->where('user_id', $user->id))
-            ->get();
-
-        if ($websites->isEmpty()) {
-            return back()->with('error', 'No active websites found.');
-        }
-
-        $totalSynced       = 0;
-        $processedWebsites = 0;
-        $failedWebsites    = 0;
-        $messages          = [];
-
-        foreach ($websites as $website) {
-            $result = $this->syncService->syncForWebsite($website, 20);
-
-            if ($result['status'] === 'success') {
-                $totalSynced += $result['synced'];
-                $processedWebsites++;
-            } else {
-                $failedWebsites++;
-                $messages[] = "{$website->name}: {$result['message']}";
-            }
-        }
-
-        if ($failedWebsites === 0) {
-            $msg = $totalSynced > 0
-                ? "Synced {$totalSynced} new order(s) from {$processedWebsites} website(s)."
-                : 'All websites already up to date.';
-            return back()->with('success', $msg);
-        }
-
-        $errorMsg = "Synced {$totalSynced} order(s) from {$processedWebsites} website(s). {$failedWebsites} failed. " . implode(' ', array_slice($messages, 0, 3));
-        return back()->with('warning', $errorMsg);
+        // Kept for older clients; the Orders page drives the resumable per-site flow.
+        // A single server request must not scan every site's complete order history.
+        return to_route('orders.index')->with('error',
+            'Use Sync orders on the Orders page with all websites selected to complete this sync.'
+        );
     }
 
 

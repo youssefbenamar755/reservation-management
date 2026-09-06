@@ -10,12 +10,12 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // ── Auto-sync WooCommerce orders every 30 minutes ─────────────────────────
-// Runs an incremental sync for all active websites — only fetches orders
-// that are NOT already in the local database, so it's fast and safe to run
-// frequently. No queue workers needed (works with QUEUE_CONNECTION=sync).
+// Reconciles orders modified since the last completed scan, with an overlap.
+// The first run scans history; later runs only fetch recent changes.
 //
 // To run manually: php artisan orders:sync-woocommerce
 // To sync a single website: php artisan orders:sync-woocommerce --website=1
+// To repair historical gaps again: php artisan orders:sync-woocommerce --full
 //
 // On Laravel Cloud (PAYG plan): Add a Scheduled Task running
 //   `php artisan schedule:run` every minute — it's free and included.

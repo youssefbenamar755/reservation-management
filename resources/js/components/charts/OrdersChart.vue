@@ -9,6 +9,7 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
   type ChartOptions,
 } from 'chart.js'
 import { computed } from 'vue'
@@ -20,7 +21,8 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler
 )
 
 interface Props {
@@ -108,4 +110,3 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     <Line :data="chartData" :options="chartOptions" />
   </div>
 </template>
-

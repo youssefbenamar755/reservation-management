@@ -7,56 +7,73 @@
  *
  * Usage:
  *   const { onNotification, offNotification } = useEchoNotifications()
- *   onMounted(() => onNotification('orders', (data) => { ... }))
+ *   onMounted(() => onNotification('orders', (data) => { ... }, user.id))
  *   onUnmounted(() => offNotification('orders'))
  */
 
 import { getEcho } from '@/lib/echo'
 
 type Handler = (data: any) => void
+type EchoInstance = NonNullable<Awaited<ReturnType<typeof getEcho>>>
 
 // Module-level state — shared across all component instances
-let channel: any = null
-let echoInstance: any = null
+let channel: ReturnType<EchoInstance['private']> | null = null
+let echoInstance: EchoInstance | null = null
 let userId: number | null = null
+let pendingSubscription: Promise<void> | null = null
+let subscriptionVersion = 0
 const handlers = new Map<string, Handler>()
 
 function dispatch(data: any) {
   handlers.forEach((fn) => fn(data))
 }
 
-function ensureSubscribed(uid: number) {
-  if (channel && userId === uid) return   // already subscribed for this user
-
-  // Clean up stale subscription if user changed
+function resetSubscription() {
+  // Invalidate any Echo initialization that completes after cleanup.
+  subscriptionVersion += 1
   if (channel && echoInstance) {
     try {
       echoInstance.leave(`App.Models.User.${userId}`)
     } catch {}
-    channel = null
   }
+  channel = null
+  echoInstance = null
+  userId = null
+  pendingSubscription = null
+}
 
+function ensureSubscribed(uid: number) {
+  if (channel || pendingSubscription) return
   userId = uid
-  getEcho().then((instance) => {
-    if (!instance) return
+  const version = ++subscriptionVersion
+  pendingSubscription = getEcho().then((instance) => {
+    if (!instance || version !== subscriptionVersion || userId !== uid) return
     echoInstance = instance
     channel = instance.private(`App.Models.User.${uid}`)
     channel.listen('.notification', (data: any) => {
       dispatch(data)
     })
-  }).catch(() => {})
+  }).catch((error) => {
+    console.error('Echo notification setup failed:', error)
+  }).finally(() => {
+    if (version === subscriptionVersion) pendingSubscription = null
+  })
 }
 
 export function useEchoNotifications() {
   function onNotification(key: string, handler: Handler, uid: number) {
-    ensureSubscribed(uid)
+    if (userId !== null && userId !== uid) {
+      resetSubscription()
+      handlers.clear()
+    }
     handlers.set(key, handler)
+    ensureSubscribed(uid)
   }
 
   function offNotification(key: string) {
     handlers.delete(key)
-    // Do NOT leave the channel here — other handlers may still need it.
-    // The channel stays alive as long as the page is loaded.
+    // Only the shared owner leaves, after the last consumer has unmounted.
+    if (handlers.size === 0) resetSubscription()
   }
 
   return { onNotification, offNotification }
