@@ -2,6 +2,7 @@
 import AppLayout from '@/layouts/app/AppSidebarLayout.vue';
 import type { BreadcrumbItemType } from '@/types';
 import Toaster from '@/components/Toaster.vue';
+import OrderAlerts from '@/components/OrderAlerts.vue';
 import { useToast } from '@/composables/useToast';
 import { usePage } from '@inertiajs/vue3';
 import { watch } from 'vue';
@@ -38,5 +39,6 @@ watch(
     <AppLayout :breadcrumbs="breadcrumbs">
         <slot />
         <Toaster />
+        <OrderAlerts v-if="page.props.auth?.user" :key="page.props.auth.user.id" />
     </AppLayout>
 </template>

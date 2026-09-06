@@ -1,43 +1,40 @@
-/**
- * Shared Echo notification composable.
- *
- * Ensures there is exactly ONE Echo private channel subscription per user.
- * Other components can register callbacks instead of creating duplicate subscriptions.
- * Waits for Echo to be initialized (getEcho) before subscribing.
- *
- * Usage:
- *   const { onNotification, offNotification } = useEchoNotifications()
- *   onMounted(() => onNotification('orders', (data) => { ... }, user.id))
- *   onUnmounted(() => offNotification('orders'))
- */
-
 import { getEcho } from '@/lib/echo'
+import { normalizeNotification, type AppNotification } from '@/lib/notifications'
 
-type Handler = (data: any) => void
+type Handler = (data: AppNotification) => void
 type EchoInstance = NonNullable<Awaited<ReturnType<typeof getEcho>>>
+type Consumer = { handler: Handler; onReconnect?: () => void }
+const events = ['.notification', '.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated']
 
-// Module-level state — shared across all component instances
+// One owner for the private channel; all page and app consumers share it.
 let channel: ReturnType<EchoInstance['private']> | null = null
-let echoInstance: EchoInstance | null = null
 let userId: number | null = null
+let seenUserId: number | null = null
 let pendingSubscription: Promise<void> | null = null
 let subscriptionVersion = 0
-const handlers = new Map<string, Handler>()
+let cleanup = () => {}
+const handlers = new Map<string, Consumer>()
+const seenIds = new Set<string>()
 
-function dispatch(data: any) {
-  handlers.forEach((fn) => fn(data))
+function safely(callback: () => void) {
+  try { callback() } catch (error) { console.error('Notification callback failed:', error) }
+}
+
+function dispatch(value: unknown) {
+  const notification = normalizeNotification(value)
+  if (!notification || seenIds.has(notification.id)) return
+  seenIds.add(notification.id)
+  if (seenIds.size > 2_000) seenIds.delete(seenIds.values().next().value!)
+  for (const [key, consumer] of [...handlers]) {
+    if (handlers.get(key) === consumer) safely(() => consumer.handler(notification))
+  }
 }
 
 function resetSubscription() {
-  // Invalidate any Echo initialization that completes after cleanup.
-  subscriptionVersion += 1
-  if (channel && echoInstance) {
-    try {
-      echoInstance.leave(`App.Models.User.${userId}`)
-    } catch {}
-  }
+  subscriptionVersion++ // Invalidate delayed initialization and captured callbacks.
+  cleanup()
+  cleanup = () => {}
   channel = null
-  echoInstance = null
   userId = null
   pendingSubscription = null
 }
@@ -48,12 +45,28 @@ function ensureSubscribed(uid: number) {
   const version = ++subscriptionVersion
   pendingSubscription = getEcho().then((instance) => {
     if (!instance || version !== subscriptionVersion || userId !== uid) return
-    echoInstance = instance
-    channel = instance.private(`App.Models.User.${uid}`)
-    channel.listen('.notification', (data: any) => {
-      dispatch(data)
-    })
+    const name = `App.Models.User.${uid}`
+    const subscribedChannel = instance.private(name)
+    channel = subscribedChannel
+    const subscription = subscribedChannel.subscription
+    const current = () => version === subscriptionVersion && userId === uid
+    const onEvent = (data: unknown) => { if (current()) dispatch(data) }
+    const onSubscribed = () => {
+      if (!current()) return
+      for (const [key, consumer] of [...handlers]) {
+        if (handlers.get(key) === consumer && consumer.onReconnect) safely(consumer.onReconnect)
+      }
+    }
+    cleanup = () => {
+      for (const event of events) subscribedChannel.stopListening(event, onEvent)
+      subscription.unbind('pusher:subscription_succeeded', onSubscribed)
+      instance.leave(name)
+    }
+    for (const event of events) subscribedChannel.listen(event, onEvent)
+    subscription.bind('pusher:subscription_succeeded', onSubscribed)
+    if (subscription.subscribed) onSubscribed()
   }).catch((error) => {
+    if (version === subscriptionVersion) resetSubscription()
     console.error('Echo notification setup failed:', error)
   }).finally(() => {
     if (version === subscriptionVersion) pendingSubscription = null
@@ -61,18 +74,21 @@ function ensureSubscribed(uid: number) {
 }
 
 export function useEchoNotifications() {
-  function onNotification(key: string, handler: Handler, uid: number) {
+  function onNotification(key: string, handler: Handler, uid: number, onReconnect?: () => void) {
     if (userId !== null && userId !== uid) {
       resetSubscription()
       handlers.clear()
     }
-    handlers.set(key, handler)
+    if (seenUserId !== uid) {
+      seenUserId = uid
+      seenIds.clear()
+    }
+    handlers.set(key, { handler, onReconnect })
     ensureSubscribed(uid)
   }
 
   function offNotification(key: string) {
     handlers.delete(key)
-    // Only the shared owner leaves, after the last consumer has unmounted.
     if (handlers.size === 0) resetSubscription()
   }
 

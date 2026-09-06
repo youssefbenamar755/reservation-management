@@ -67,10 +67,13 @@ function fakeEcho() {
       subscriptions.push(name)
       if (!channels.has(name)) {
         channels.set(name, {
-          callbacks: [],
+          callbacks: new Map(),
+          subscription: { bind() {}, unbind() {} },
           listen(event, callback) {
-            assert.equal(event, '.notification')
-            this.callbacks.push(callback)
+            this.callbacks.set(event, callback)
+          },
+          stopListening(event) {
+            this.callbacks.delete(event)
           },
         })
       }
@@ -81,7 +84,7 @@ function fakeEcho() {
       channels.delete(name)
     },
     emit(name, data) {
-      channels.get(name)?.callbacks.forEach((callback) => callback(data))
+      channels.get(name)?.callbacks.get('.notification')?.(data)
     },
   }
 }
@@ -89,6 +92,7 @@ function fakeEcho() {
 const flushPromises = () => new Promise((resolve) => setImmediate(resolve))
 const notifications = (getEcho) => loadModule(source('composables/useEchoNotifications.ts'), {
   '@/lib/echo': { getEcho },
+  '@/lib/notifications': loadModule(source('lib/notifications.ts')),
 }).useEchoNotifications()
 
 test('concurrent notification consumers subscribe once and receive each event once', async () => {
@@ -102,7 +106,7 @@ test('concurrent notification consumers subscribe once and receive each event on
   ready.resolve(echo)
   await flushPromises()
   assert.deepEqual(echo.subscriptions, ['App.Models.User.7'])
-  echo.emit('App.Models.User.7', { type: 'order' })
+  echo.emit('App.Models.User.7', { id: 'notification-1', type: 'order' })
   assert.deepEqual(received, ['bell', 'orders-index', 'submissions-index'])
 })
 
@@ -115,7 +119,7 @@ test('leaving Submissions preserves the bell and the last unmount permits a clea
   onNotification('submissions-index', () => submissionEvents++, 7)
   await flushPromises()
   offNotification('submissions-index')
-  echo.emit('App.Models.User.7', { type: 'order' })
+  echo.emit('App.Models.User.7', { id: 'notification-1', type: 'order' })
   assert.equal(bellEvents, 1)
   assert.equal(submissionEvents, 0)
   assert.deepEqual(echo.departures, [])
@@ -124,7 +128,7 @@ test('leaving Submissions preserves the bell and the last unmount permits a clea
   assert.deepEqual(echo.departures, ['App.Models.User.7'])
   onNotification('bell', () => bellEvents++, 7)
   await flushPromises()
-  echo.emit('App.Models.User.7', { type: 'order' })
+  echo.emit('App.Models.User.7', { id: 'notification-2', type: 'order' })
   assert.equal(bellEvents, 2)
   assert.equal(echo.subscriptions.length, 2)
 })
@@ -154,7 +158,7 @@ test('switching users invalidates pending subscriptions and old handlers', async
   ready.resolve(echo)
   await flushPromises()
   assert.deepEqual(echo.subscriptions, ['App.Models.User.8'])
-  echo.emit('App.Models.User.8', { type: 'order' })
+  echo.emit('App.Models.User.8', { id: 'notification-1', type: 'order' })
   assert.deepEqual(received, ['new'])
 })
 

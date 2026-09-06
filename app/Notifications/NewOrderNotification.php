@@ -8,7 +8,6 @@ use Illuminate\Notifications\Notification;
 
 class NewOrderNotification extends Notification implements ShouldBroadcast
 {
-
     public function __construct(
         public WcOrder $order
     ) {}
@@ -25,12 +24,15 @@ class NewOrderNotification extends Notification implements ShouldBroadcast
 
     /**
      * Get the broadcast event name.
-     *
-     * @return string
      */
     public function broadcastAs(): string
     {
         return 'notification';
+    }
+
+    public function broadcastType(): string
+    {
+        return 'order';
     }
 
     /**
@@ -40,40 +42,14 @@ class NewOrderNotification extends Notification implements ShouldBroadcast
      */
     public function toBroadcast(object $notifiable): array
     {
-        $website = $this->order->website;
-        $amount = $this->order->total ? '$' . number_format($this->order->total, 2) : 'N/A';
-        $paymentStatus = $this->order->payment_status ?? 'unknown';
-
-        $data = [
-            'type' => 'order',
-            'website_id' => $this->order->website_id,
-            'website_name' => $website->name ?? 'Unknown',
-            'order_id' => $this->order->id,
-            'wp_order_id' => $this->order->wp_order_id,
-            'amount' => $this->order->total,
-            'amount_formatted' => $amount,
-            'payment_status' => $paymentStatus,
-            'message' => "New order #{$this->order->wp_order_id} from {$website->name} — {$amount}",
-        ];
-
-        // Get the notification ID from database (it's created when stored)
-        // Use the notification's ID property which Laravel sets after storing
-        $notificationId = $this->id ?? null;
-        
-        if (!$notificationId) {
-            // Fallback: try to find it in the database
-            $notification = $notifiable->notifications()
-                ->where('type', self::class)
-                ->where('data->order_id', $this->order->id)
-                ->latest()
-                ->first();
-            $notificationId = $notification?->id;
-        }
+        $data = $this->toArray($notifiable);
 
         return [
-            'id' => $notificationId ?? uniqid(),
+            // Laravel assigns this before delivery; the webhook reuses the saved inbox ID.
+            'id' => $this->id,
             'type' => $data['type'],
             'message' => $data['message'],
+            'read_at' => null,
             'created_at' => now()->toISOString(),
             'redirect_url' => route('orders.show', $this->order->id),
             'data' => $data,
@@ -87,21 +63,24 @@ class NewOrderNotification extends Notification implements ShouldBroadcast
      */
     public function toArray(object $notifiable): array
     {
-        $website = $this->order->website;
-        $amount = $this->order->total ? '$' . number_format($this->order->total, 2) : 'N/A';
+        $websiteName = $this->order->website?->name ?? 'Unknown';
+        $currency = strtoupper((string) $this->order->currency);
+        $amount = $this->order->total !== null
+            ? trim($currency.' '.number_format((float) $this->order->total, 2))
+            : 'N/A';
         $paymentStatus = $this->order->payment_status ?? 'unknown';
 
         return [
             'type' => 'order',
             'website_id' => $this->order->website_id,
-            'website_name' => $website->name ?? 'Unknown',
+            'website_name' => $websiteName,
             'order_id' => $this->order->id,
             'wp_order_id' => $this->order->wp_order_id,
             'amount' => $this->order->total,
+            'currency' => $currency,
             'amount_formatted' => $amount,
             'payment_status' => $paymentStatus,
-            'message' => "New order #{$this->order->wp_order_id} from {$website->name} — {$amount}",
+            'message' => "New order #{$this->order->wp_order_id} from {$websiteName} — {$amount}",
         ];
     }
 }
-

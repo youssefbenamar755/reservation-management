@@ -6,7 +6,6 @@ use App\Models\FfSubmission;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Notifications\Notification;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
 class NewFormSubmissionNotification extends Notification implements ShouldBroadcast
 {
@@ -28,12 +27,15 @@ class NewFormSubmissionNotification extends Notification implements ShouldBroadc
 
     /**
      * Get the broadcast event name.
-     *
-     * @return string
      */
     public function broadcastAs(): string
     {
         return 'notification';
+    }
+
+    public function broadcastType(): string
+    {
+        return 'form_submission';
     }
 
     /**
@@ -57,8 +59,8 @@ class NewFormSubmissionNotification extends Notification implements ShouldBroadc
         // Get the notification ID from database (it's created when stored)
         // Use the notification's ID property which Laravel sets after storing
         $notificationId = $this->id ?? null;
-        
-        if (!$notificationId) {
+
+        if (! $notificationId) {
             // Fallback: try to find it in the database
             $notification = $notifiable->notifications()
                 ->where('type', self::class)
@@ -97,4 +99,3 @@ class NewFormSubmissionNotification extends Notification implements ShouldBroadc
         ];
     }
 }
-
