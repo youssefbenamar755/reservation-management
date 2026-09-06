@@ -3,13 +3,15 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head, router, usePage } from '@inertiajs/vue3'
 import { computed, ref, watch } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Trash2, ArrowLeft, Mail, Calendar, Globe, FileText, Hash, ClipboardList, Eye, EyeOff, Code, Database, Copy, CheckCircle2, Ticket, Loader2, AlertCircle, Download } from 'lucide-vue-next'
+import { Trash2, ArrowLeft, Calendar, Globe, FileText, ClipboardList, Code, Copy, CheckCircle2, Ticket, Loader2, AlertCircle, Download, Users, Plane, ChevronDown } from 'lucide-vue-next'
 import { Link } from '@inertiajs/vue3'
 import { useToast } from '@/composables/useToast'
 import FlightCard from '@/components/FlightCard.vue'
+import EntryField from '@/components/submissions/EntryField.vue'
+import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue'
 
 const props = defineProps<{ 
   entry: any
@@ -37,7 +39,7 @@ const entryPdfs = ref<Array<{ passenger_name: string; url: string }>>([])
 
 watch(
   () => (page.props as any).flash?.success,
-  (message, oldMessage) => {
+  (message) => {
     // Only show toast if message exists and is different from what we last processed
     if (message && message !== lastProcessedFlash.value.success) {
       lastProcessedFlash.value.success = message
@@ -48,7 +50,7 @@ watch(
 
 watch(
   () => (page.props as any).flash?.error,
-  (message, oldMessage) => {
+  (message) => {
     // Only show toast if message exists and is different from what we last processed
     if (message && message !== lastProcessedFlash.value.error) {
       lastProcessedFlash.value.error = message
@@ -77,6 +79,7 @@ function deleteEntry() {
 function formatDate(dateString: string | null) {
   if (!dateString) return '—'
   const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return dateString
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
@@ -86,7 +89,7 @@ function formatDate(dateString: string | null) {
   }).format(date)
 }
 
-function copyToClipboard(text: string, fieldKey: string) {
+function copyToClipboard(text: unknown, fieldKey: string) {
   const textToCopy = typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text)
   navigator.clipboard.writeText(textToCopy).then(() => {
     copiedField.value = fieldKey
@@ -148,7 +151,7 @@ function generatePnr() {
   
   router.post(`/submissions/entries/${props.entry.id}/generate-pnr`, {}, {
     preserveScroll: true,
-    onSuccess: (page) => {
+    onSuccess: () => {
       isGeneratingPnr.value = false
       
       // Reload entry data to show the generated PNR (partial reload, no full page refresh)
@@ -219,7 +222,7 @@ function ensureParsedFlightData(value: any): any {
   if (typeof value === 'string') {
     try {
       return JSON.parse(value)
-    } catch (e) {
+    } catch {
       return value
     }
   }
@@ -294,7 +297,7 @@ function isFlightJsonData(value: any): boolean {
   if (typeof value === 'string') {
     try {
       data = JSON.parse(value)
-    } catch (e) {
+    } catch {
       return false
     }
   }
@@ -309,7 +312,6 @@ function isFlightJsonData(value: any): boolean {
   const hasItineraries = Array.isArray(data.itineraries) && data.itineraries.length > 0
   const hasValidatingAirlines = Array.isArray(data.validatingAirlineCodes) && data.validatingAirlineCodes.length > 0
   const hasPrice = data.price && typeof data.price === 'object' && (data.price.total || data.price.grandTotal || data.price.base)
-  const hasTravelerPricings = Array.isArray(data.travelerPricings) && data.travelerPricings.length > 0
   
   // Additional checks: verify itineraries have segments structure
   let hasValidSegments = false
@@ -366,7 +368,7 @@ const formFields = computed(() => {
   if (typeof response === 'string') {
     try {
       response = JSON.parse(response)
-    } catch (e) {
+    } catch {
       // If parsing fails, treat it as a regular string value
       // This means the entire response field is a single string
       return [{
@@ -402,12 +404,6 @@ const formFields = computed(() => {
   // This will match "Title 3 Names", "title_3_names", "title-3-names", etc. (legacy: also matches "Dropdown 3 Names")
   const normalizeKey = (k: string): string => {
     return k.toLowerCase().replace(/[\s_-]+/g, '')
-  }
-  
-  // Get base field key (remove numeric suffix) for grouping repeated fields
-  const getBaseKey = (k: string): string => {
-    const match = k.match(/^(.+?)_(\d+)$/)
-    return match ? match[1] : k
   }
   
   // Helper to check if a key is related to "title_3" (legacy: was "Dropdown 3")
@@ -482,7 +478,7 @@ const formFields = computed(() => {
     if (typeof value === 'string' && (value.trim().startsWith('{') || value.trim().startsWith('['))) {
       try {
         parsedValue = JSON.parse(value)
-      } catch (e) {
+      } catch {
         // If parsing fails, keep original value
         parsedValue = value
       }
@@ -494,26 +490,6 @@ const formFields = computed(() => {
     const isEmailField = !isComplex && !isArray && typeof parsedValue === 'string' && isEmail(parsedValue)
     const isUrlField = !isComplex && !isArray && typeof parsedValue === 'string' && isUrl(parsedValue)
     const isFlightData = isComplex && isFlightJsonData(parsedValue)
-    
-    // Debug: Log all fields to find the flight JSON data field
-    if (key.toLowerCase().includes('flight') || key.toLowerCase().includes('json')) {
-      console.log('Field check:', {
-        key,
-        originalValue: value,
-        parsedValue: typeof parsedValue === 'object' && parsedValue !== null ? {
-          type: 'object',
-          keys: Object.keys(parsedValue as any),
-          hasItineraries: Array.isArray((parsedValue as any).itineraries),
-          hasValidatingAirlineCodes: Array.isArray((parsedValue as any).validatingAirlineCodes),
-          hasPrice: typeof (parsedValue as any).price === 'object' && (parsedValue as any).price !== null,
-        } : {
-          type: typeof parsedValue,
-          value: typeof parsedValue === 'string' ? parsedValue.substring(0, 100) : parsedValue
-        },
-        isComplex,
-        isFlightData,
-      })
-    }
     
     // Use parsed value for further processing
     const valueToStore = parsedValue
@@ -658,11 +634,28 @@ const formFields = computed(() => {
   
   // Merge all names variant fields into a single "names" field
   if (namesVariantFields.length > 0) {
-    // Collect all passenger objects with their original field keys
-    // This preserves which field each passenger came from for title matching
+    // Name suffixes are form-builder IDs, not passenger numbers: names_5 can
+    // be the second passenger. Keep response order, including unanswered slots.
+    const positionsByKey = new Map<string, number>()
+    let nextPosition = 0
+    for (const [key, value] of Object.entries(response)) {
+      if (!isNamesVariantField(key)) continue
+      const normalizedKey = normalizeKey(key)
+      if (positionsByKey.has(normalizedKey)) continue
+      let parsed = value
+      if (typeof value === 'string') {
+        try { parsed = JSON.parse(value) } catch { /* Plain names stay plain text. */ }
+      }
+      positionsByKey.set(normalizedKey, nextPosition)
+      nextPosition += Array.isArray(parsed) ? Math.max(1, parsed.length) : 1
+    }
+
+    // Preserve every submitted name value. Only recognized name records receive
+    // display annotations; strings, unfamiliar objects, and nested arrays remain intact.
     const passengersWithKeys: Array<{
       passenger: any
       originalKey: string
+      position: number
     }> = []
     const allKeys: string[] = []
     
@@ -674,77 +667,46 @@ const formFields = computed(() => {
         allKeys.push(field.key)
       }
       
-      // Collect passenger objects
-      if (typeof field.value === 'object' && field.value !== null && !Array.isArray(field.value)) {
-        // Single passenger object
-        // Check if it has first_name/last_name structure
-        if (field.value.first_name || field.value.last_name || field.value.firstname || field.value.lastname) {
-          passengersWithKeys.push({
-            passenger: field.value,
-            originalKey: originalKey
-          })
-        }
-      } else if (Array.isArray(field.value)) {
-        // Array of passengers
-        for (const item of field.value) {
-          if (typeof item === 'object' && item !== null) {
-            if (item.first_name || item.last_name || item.firstname || item.lastname) {
-              passengersWithKeys.push({
-                passenger: item,
-                originalKey: originalKey
-              })
-            }
-          }
-        }
-      }
+      const values = Array.isArray(field.value) ? field.value : [field.value]
+      const firstPosition = positionsByKey.get(normalizeKey(originalKey)) ?? passengersWithKeys.length
+      values.forEach((passenger: any, index: number) => {
+        passengersWithKeys.push({ passenger, originalKey, position: firstPosition + index })
+      })
     }
     
     // Collect all title fields from original response for matching
     // Match titles to passengers by order: title -> first passenger, title_2 -> second passenger, etc.
-    const titleValues: string[] = []
+    const titleValues: Array<string | null> = []
     const responseKeys = Object.keys(response)
     
-    // Extract title values in order from response (title, title_2, title_3, ..., title_6)
-    // First, try to get title (for first passenger)
-    if (response.title !== null && response.title !== undefined) {
-      const titleValue = String(response.title).trim()
-      if (titleValue) {
-        titleValues.push(titleValue)
-      }
-    }
-    
-    // Then extract title_2, title_3, ..., title_6 in order
-    for (let i = 2; i <= 6; i++) {
-      const titleKey = `title_${i}`
-      if (response[titleKey] !== null && response[titleKey] !== undefined) {
-        const titleValue = String(response[titleKey]).trim()
-        if (titleValue) {
-          titleValues.push(titleValue)
-        }
-      }
+    // Do not compact missing titles: title_2 belongs to the second passenger.
+    for (let i = 1; i <= 6; i++) {
+      const titleKey = i === 1 ? 'title' : `title_${i}`
+      titleValues.push(response[titleKey] == null ? null : String(response[titleKey]).trim() || null)
     }
     
     // Fallback: If no title fields found, try dropdown fields for backward compatibility
-    if (titleValues.length === 0) {
+    if (!titleValues.some(Boolean)) {
+      titleValues.length = 0
       for (const key of responseKeys) {
         const keyLower = key.toLowerCase()
-        if (keyLower.startsWith('dropdown') && response[key] !== null && response[key] !== undefined) {
-          const dropdownValue = String(response[key]).trim()
-          if (dropdownValue) {
-            titleValues.push(dropdownValue)
-          }
+        if (keyLower.startsWith('dropdown')) {
+          titleValues.push(response[key] == null ? null : String(response[key]).trim() || null)
         }
       }
     }
     
     // Match titles to passengers by index
     // If we have titles and passengers, match them in order
-    const passengersWithTitles = passengersWithKeys.map(({ passenger, originalKey }, index) => {
+    const passengersWithTitles = passengersWithKeys.map(({ passenger, originalKey, position }) => {
+      const recognized = passenger !== null && typeof passenger === 'object' && !Array.isArray(passenger) &&
+        (passenger.first_name || passenger.last_name || passenger.firstname || passenger.lastname)
+      if (!recognized) return passenger
       let title: string | null = null
       
       // Try to match title by index (first title -> first passenger)
-      if (index < titleValues.length) {
-        title = titleValues[index]
+      if (position < titleValues.length) {
+        title = titleValues[position]
       }
       
       // If no match found, check if title is already in passenger object
@@ -877,23 +839,27 @@ const phoneField = computed(() => {
 
 // Identify Flight Departure field
 const flightDepartureField = computed(() => {
-  return formFields.value.find(field => 
+  return formFields.value.find(field =>
+    field.key !== flightFromField.value?.key && field.key !== flightToField.value?.key && (
     field.label.toLowerCase().includes('flight departure') || 
     field.label.toLowerCase().includes('departure') ||
     field.key.toLowerCase().includes('flight_departure') ||
     field.key.toLowerCase().includes('flightdeparture') ||
-    field.key.toLowerCase().includes('departure')
+    field.key.toLowerCase().includes('departure'))
   )
 })
 
 // Identify Flight Arrival field
 const flightArrivalField = computed(() => {
-  return formFields.value.find(field => 
+  return formFields.value.find(field =>
+    field.key !== flightFromField.value?.key && field.key !== flightToField.value?.key && field.key !== flightDepartureField.value?.key && (
     field.label.toLowerCase().includes('flight arrival') || 
     field.label.toLowerCase().includes('arrival') ||
+    field.label.toLowerCase().includes('return date') ||
     field.key.toLowerCase().includes('flight_arrival') ||
     field.key.toLowerCase().includes('flightarrival') ||
-    field.key.toLowerCase().includes('arrival')
+    field.key.toLowerCase().includes('arrival') ||
+    field.key.toLowerCase().includes('return_date'))
   )
 })
 
@@ -905,1141 +871,852 @@ const namesFieldDisplay = computed(() => {
   )
 })
 
-// Get remaining fields (excluding Flight From, Flight To, Email, Phone, Flight Departure, Flight Arrival, and Names)
-const remainingFields = computed(() => {
-  const fromKey = flightFromField.value?.key
-  const toKey = flightToField.value?.key
-  const emailKey = emailField.value?.key
-  const phoneKey = phoneField.value?.key
-  const departureKey = flightDepartureField.value?.key
-  const arrivalKey = flightArrivalField.value?.key
-  const namesKey = namesFieldDisplay.value?.key
-  return formFields.value.filter(field => 
-    field.key !== fromKey && 
-    field.key !== toKey && 
-    field.key !== emailKey && 
-    field.key !== phoneKey &&
-    field.key !== departureKey &&
-    field.key !== arrivalKey &&
-    field.key !== namesKey
-  )
+// Each response field belongs to one visible section, regardless of form schema.
+type DisplayField = (typeof formFields.value)[number]
+function uniqueFields(candidates: Array<DisplayField | undefined>) {
+  const seen = new Set<string>()
+  return candidates.filter((field): field is DisplayField => {
+    if (!field || seen.has(field.key)) return false
+    seen.add(field.key)
+    return true
+  })
+}
+
+const flightFields = computed(() => formFields.value.filter(field => field.isFlight))
+const contactFields = computed(() => {
+  const fields = uniqueFields([emailField.value, phoneField.value]).filter(field => !field.isFlight && field.key !== namesFieldDisplay.value?.key)
+  if (!emailField.value && props.entry.email) {
+    fields.unshift({ key: 'entry_email', label: 'Email', value: props.entry.email, isEmail: true, isUrl: false, isArray: false, isComplex: false, isFlight: false })
+  }
+  return fields
 })
+const travelFields = computed(() => {
+  const contactKeys = new Set(contactFields.value.map(field => field.key))
+  return uniqueFields([flightFromField.value, flightToField.value, flightDepartureField.value, flightArrivalField.value])
+    .filter(field => !field.isFlight && !contactKeys.has(field.key) && field.key !== namesFieldDisplay.value?.key)
+})
+const additionalFields = computed(() => {
+  const assigned = new Set([...contactFields.value, ...travelFields.value, ...flightFields.value].map(field => field.key))
+  if (namesFieldDisplay.value) assigned.add(namesFieldDisplay.value.key)
+  return formFields.value.filter(field => !assigned.has(field.key))
+})
+const passengerRows = computed(() => {
+  const value = namesFieldDisplay.value?.value
+  if (Array.isArray(value)) return value
+  return isPassengerRecord(value) ? [value] : []
+})
+function isPassengerRecord(value: any) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Boolean(value.first_name || value.firstname || value.last_name || value.lastname)
+}
+const technicalMetadata = computed(() => [
+  { label: 'IP address', value: submissionMeta.value.userIP },
+  { label: 'Source URL', value: submissionMeta.value.sourceURL },
+  { label: 'Browser', value: submissionMeta.value.browser },
+  { label: 'Device / OS', value: submissionMeta.value.device },
+  { label: 'User', value: submissionMeta.value.user },
+].filter(item => !isFieldEmpty(item.value)))
 </script>
 
 <template>
-  <Head title="Entry Details" />
+    <Head :title="`Submission #${entry.entry_id}`" />
 
-  <AppLayout :breadcrumbs="breadcrumbs">
-    <div
-      class="flex h-full flex-1 flex-col gap-4 sm:gap-6 overflow-x-auto rounded-xl p-3 sm:p-4"
-    >
-      <!-- Header -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div class="flex items-center gap-4">
-          <Link :href="`/submissions/forms/${entry.website_id}/${entry.form_id}`" class="flex-1 sm:flex-none">
-            <Button variant="outline" size="sm" class="w-full sm:w-auto">
-              <ArrowLeft class="mr-2 h-4 w-4" />
-              <span class="hidden sm:inline">Back to Entries</span>
-              <span class="sm:hidden">Back</span>
-            </Button>
-          </Link>
-        
-        </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          :disabled="isDeleting"
-          @click="deleteEntry"
-          class="w-full sm:w-auto"
+    <AppLayout :breadcrumbs="breadcrumbs">
+        <div
+            class="mx-auto flex w-full max-w-[1600px] min-w-0 flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8"
         >
-          <Trash2 v-if="!isDeleting" class="mr-2 h-4 w-4" />
-          <span v-else class="mr-2 h-4 w-4 animate-spin">⏳</span>
-          {{ isDeleting ? 'Deleting...' : 'Delete Entry' }}
-        </Button>
-      </div>
-
-      <!-- Main Content & Sidebar Layout -->
-      <div class="grid gap-6 grid-cols-1 lg:grid-cols-3">
-        <!-- Left Column: Form Entry Data -->
-        <div class="lg:col-span-2 space-y-6 order-2 lg:order-1">
-          <!-- Form Entry Data -->
-          <Card>
-            <CardHeader>
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div class="flex-1 min-w-0">
-                  <CardTitle class="flex items-center gap-2 flex-wrap">
-                    <Database class="h-5 w-5 flex-shrink-0" />
-                    <span class="break-words">Form Entry #{{ entry.entry_id }}</span>
-                  </CardTitle>
-                  <CardDescription class="break-words">
-                    Form ID: {{ entry.form_id }} • {{ entry.website.name }}
-                  </CardDescription>
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
-                  <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-foreground text-muted-foreground whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      v-model="showEmptyFields"
-                      class="h-4 w-4 rounded border-input"
-                    />
-                    <span class="hidden sm:inline">Show empty fields</span>
-                    <span class="sm:hidden">Show empty</span>
-                  </label>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div v-if="formFields.length > 0" class="space-y-4">
-                <!-- Flight From and Flight To - Side by Side -->
-                <div v-if="flightFromField || flightToField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <!-- Flight From Field -->
-                  <div v-if="flightFromField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ flightFromField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(flightFromField.value, flightFromField.key)"
-                          :title="copiedField === flightFromField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === flightFromField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!flightFromField.isComplex && !flightFromField.isArray" class="pl-4">
-                        <a
-                          v-if="flightFromField.isEmail"
-                          :href="`mailto:${flightFromField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightFromField.value }}
-                        </a>
-                        <a
-                          v-else-if="flightFromField.isUrl"
-                          :href="flightFromField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightFromField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ flightFromField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="flightFromField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in flightFromField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="flightFromField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(flightFromField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Flight To Field -->
-                  <div v-if="flightToField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ flightToField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(flightToField.value, flightToField.key)"
-                          :title="copiedField === flightToField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === flightToField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!flightToField.isComplex && !flightToField.isArray" class="pl-4">
-                        <a
-                          v-if="flightToField.isEmail"
-                          :href="`mailto:${flightToField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightToField.value }}
-                        </a>
-                        <a
-                          v-else-if="flightToField.isUrl"
-                          :href="flightToField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightToField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ flightToField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="flightToField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in flightToField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="flightToField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(flightToField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Email and Phone - Side by Side -->
-                <div v-if="emailField || phoneField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <!-- Email Field -->
-                  <div v-if="emailField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ emailField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(emailField.value, emailField.key)"
-                          :title="copiedField === emailField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === emailField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!emailField.isComplex && !emailField.isArray" class="pl-4">
-                        <a
-                          v-if="emailField.isEmail"
-                          :href="`mailto:${emailField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ emailField.value }}
-                        </a>
-                        <a
-                          v-else-if="emailField.isUrl"
-                          :href="emailField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ emailField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ emailField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="emailField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in emailField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="emailField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(emailField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Phone Field -->
-                  <div v-if="phoneField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ phoneField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(phoneField.value, phoneField.key)"
-                          :title="copiedField === phoneField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === phoneField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!phoneField.isComplex && !phoneField.isArray" class="pl-4">
-                        <a
-                          v-if="phoneField.isEmail"
-                          :href="`mailto:${phoneField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ phoneField.value }}
-                        </a>
-                        <a
-                          v-else-if="phoneField.isUrl"
-                          :href="phoneField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ phoneField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ phoneField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="phoneField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in phoneField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="phoneField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(phoneField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Flight Departure and Flight Arrival - Side by Side -->
-                <div v-if="flightDepartureField || flightArrivalField" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <!-- Flight Departure Field -->
-                  <div v-if="flightDepartureField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ flightDepartureField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(flightDepartureField.value, flightDepartureField.key)"
-                          :title="copiedField === flightDepartureField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === flightDepartureField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!flightDepartureField.isComplex && !flightDepartureField.isArray" class="pl-4">
-                        <a
-                          v-if="flightDepartureField.isEmail"
-                          :href="`mailto:${flightDepartureField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightDepartureField.value }}
-                        </a>
-                        <a
-                          v-else-if="flightDepartureField.isUrl"
-                          :href="flightDepartureField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightDepartureField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ flightDepartureField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="flightDepartureField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in flightDepartureField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="flightDepartureField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(flightDepartureField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Flight Arrival Field -->
-                  <div v-if="flightArrivalField" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ flightArrivalField.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(flightArrivalField.value, flightArrivalField.key)"
-                          :title="copiedField === flightArrivalField.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === flightArrivalField.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!flightArrivalField.isComplex && !flightArrivalField.isArray" class="pl-4">
-                        <a
-                          v-if="flightArrivalField.isEmail"
-                          :href="`mailto:${flightArrivalField.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightArrivalField.value }}
-                        </a>
-                        <a
-                          v-else-if="flightArrivalField.isUrl"
-                          :href="flightArrivalField.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ flightArrivalField.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ flightArrivalField.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="flightArrivalField.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in flightArrivalField.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) -->
-                      <div v-else-if="flightArrivalField.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(flightArrivalField.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Names Field -->
-                <div v-if="namesFieldDisplay" class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors">
-                  <div class="space-y-3">
-                    <div class="flex items-start justify-between gap-2 sm:gap-4">
-                      <div class="flex items-center gap-2 flex-1 min-w-0">
-                        <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                          {{ namesFieldDisplay.label }}
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        class="h-8 w-8 p-0 flex-shrink-0"
-                        @click="copyToClipboard(namesFieldDisplay.value, namesFieldDisplay.key)"
-                        :title="copiedField === namesFieldDisplay.key ? 'Copied!' : 'Copy value'"
-                      >
-                        <CheckCircle2 v-if="copiedField === namesFieldDisplay.key" class="h-4 w-4 text-green-500" />
-                        <Copy v-else class="h-4 w-4" />
-                      </Button>
-                    </div>
-                    
-                    <!-- Passenger List (Grouped Names) -->
-                    <div v-if="namesFieldDisplay.isArray && Array.isArray(namesFieldDisplay.value) && namesFieldDisplay.value.length > 0" class="pl-4">
-                      <div class="space-y-2">
+            <header class="space-y-5">
+                <Link
+                    :href="`/submissions/forms/${entry.website_id}/${entry.form_id}`"
+                    class="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    <ArrowLeft class="h-4 w-4" /> Back to entries
+                </Link>
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div class="min-w-0 space-y-2">
                         <div
-                          v-for="(passenger, index) in namesFieldDisplay.value"
-                          :key="index"
-                          class="p-3 rounded border bg-muted/20"
+                            class="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground"
                         >
-                          <div class="flex items-start gap-2 text-sm font-medium text-foreground">
-                            <span class="text-muted-foreground">•</span>
-                            <span class="flex-1 break-words">
-                              <template v-if="passenger._title || passenger.title || passenger.salutation">
-                                <span class="font-semibold">{{ passenger._title || passenger.title || passenger.salutation }}</span>
-                                <span class="mx-2 text-muted-foreground">—</span>
-                              </template>
-                              <span class="text-sm">
-  <strong>Fn:</strong>
-  {{ passenger.first_name || passenger.firstname || '—' }}
-  &nbsp;
-  <strong>Ln:</strong>
-  {{ passenger.last_name || passenger.lastname || '—' }}
-</span>
-
-                            </span>
-                          </div>
+                            <Globe class="h-3.5 w-3.5" />
+                            <span class="[overflow-wrap:anywhere]">{{
+                                entry.website?.name || 'Website'
+                            }}</span>
+                            <span aria-hidden="true">/</span
+                            ><span>Form #{{ entry.form_id }}</span>
                         </div>
-                      </div>
+                        <h1
+                            class="text-2xl font-semibold tracking-tight sm:text-3xl"
+                        >
+                            Submission #{{ entry.entry_id }}
+                        </h1>
+                        <p
+                            class="flex items-center gap-2 text-sm text-muted-foreground"
+                        >
+                            <Calendar class="h-4 w-4 shrink-0" />
+                            {{ formatDate(entry.created_at_wp) }}
+                        </p>
                     </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Badge
+                            v-if="submissionMeta.status"
+                            variant="secondary"
+                            class="capitalize"
+                            >{{ submissionMeta.status }}</Badge
+                        >
+                        <Badge
+                            variant="outline"
+                            class="gap-1.5 px-3 py-1.5 font-normal"
+                        >
+                            <span
+                                class="h-1.5 w-1.5 rounded-full"
+                                :class="
+                                    entry.pnr
+                                        ? 'bg-emerald-500'
+                                        : 'bg-muted-foreground'
+                                "
+                            />
+                            {{
+                                entry.pnr
+                                    ? 'PNR generated'
+                                    : 'PNR not generated'
+                            }}
+                        </Badge>
+                    </div>
+                </div>
+                <nav
+                    aria-label="Submission sections"
+                    class="flex flex-wrap gap-1 border-b border-border pb-3"
+                >
+                    <a
+                        href="#customer-details"
+                        class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >Customer & passengers</a
+                    >
+                    <a
+                        v-if="travelFields.length || flightFields.length"
+                        href="#travel-details"
+                        class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >Travel details</a
+                    >
+                    <a
+                        href="#booking-tools"
+                        class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >Booking tools</a
+                    >
+                    <a
+                        v-if="additionalFields.length"
+                        href="#additional-details"
+                        class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >Additional information</a
+                    >
+                </nav>
+            </header>
 
-                    <!-- Simple Value (String) -->
-                    <div v-else-if="!namesFieldDisplay.isComplex && !namesFieldDisplay.isArray" class="pl-4">
-                      <a
-                        v-if="namesFieldDisplay.isEmail"
-                        :href="`mailto:${namesFieldDisplay.value}`"
-                        class="text-base font-medium text-primary hover:underline break-words block"
-                      >
-                        {{ namesFieldDisplay.value }}
-                      </a>
-                      <a
-                        v-else-if="namesFieldDisplay.isUrl"
-                        :href="namesFieldDisplay.value"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="text-base font-medium text-primary hover:underline break-words block"
-                      >
-                        {{ namesFieldDisplay.value }}
-                      </a>
-                      <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                        {{ namesFieldDisplay.value || '(empty)' }}
-                      </p>
-                    </div>
+            <div
+                class="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]"
+            >
+                <div class="min-w-0 space-y-6">
+                    <Card
+                        id="customer-details"
+                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    >
+                        <CardHeader class="border-b border-border pb-5">
+                            <h2
+                                class="flex items-center gap-2 text-base font-semibold"
+                            >
+                                <Users class="h-4 w-4 text-muted-foreground" />
+                                Customer & passengers
+                            </h2>
+                            <CardDescription
+                                >Contact information and passenger names from
+                                this submission.</CardDescription
+                            >
+                        </CardHeader>
+                        <CardContent class="space-y-6 pt-5">
+                            <div
+                                v-if="contactFields.length"
+                                class="grid min-w-0 gap-3 sm:grid-cols-2"
+                            >
+                                <EntryField
+                                    v-for="field in contactFields"
+                                    :key="field.key"
+                                    :field="field"
+                                    :copied-field="copiedField"
+                                    @copy="copyToClipboard"
+                                />
+                            </div>
+                            <div
+                                v-if="namesFieldDisplay"
+                                class="min-w-0 space-y-3"
+                            >
+                                <div
+                                    class="flex items-center justify-between gap-3"
+                                >
+                                    <h3 class="text-sm font-medium">
+                                        Passengers
+                                        <span
+                                            v-if="passengerRows.length"
+                                            class="ml-1 text-muted-foreground"
+                                            >({{ passengerRows.length }})</span
+                                        >
+                                    </h3>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 gap-2 text-xs text-muted-foreground"
+                                        @click="
+                                            copyToClipboard(
+                                                namesFieldDisplay.value,
+                                                namesFieldDisplay.key,
+                                            )
+                                        "
+                                    >
+                                        <CheckCircle2
+                                            v-if="
+                                                copiedField ===
+                                                namesFieldDisplay.key
+                                            "
+                                            class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                                        />
+                                        <Copy v-else class="h-3.5 w-3.5" /> Copy
+                                        passengers
+                                    </Button>
+                                </div>
+                                <ol
+                                    v-if="passengerRows.length"
+                                    class="divide-y divide-border rounded-lg border border-border"
+                                >
+                                    <li
+                                        v-for="(
+                                            passenger, index
+                                        ) in passengerRows"
+                                        :key="index"
+                                        class="flex min-w-0 items-start gap-3 p-4 sm:gap-4"
+                                    >
+                                        <span
+                                            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums"
+                                            >{{
+                                                String(index + 1).padStart(
+                                                    2,
+                                                    '0',
+                                                )
+                                            }}</span
+                                        >
+                                        <div class="min-w-0 flex-1">
+                                            <dl
+                                                v-if="
+                                                    isPassengerRecord(passenger)
+                                                "
+                                                class="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-[70px_minmax(0,1fr)_minmax(0,1fr)]"
+                                            >
+                                                <div
+                                                    class="col-span-2 min-w-0 sm:col-span-1"
+                                                >
+                                                    <dt
+                                                        class="mb-1 text-xs text-muted-foreground"
+                                                    >
+                                                        Title
+                                                    </dt>
+                                                    <dd
+                                                        class="text-sm font-medium [overflow-wrap:anywhere]"
+                                                    >
+                                                        {{
+                                                            passenger._title ||
+                                                            passenger.title ||
+                                                            passenger.salutation ||
+                                                            '—'
+                                                        }}
+                                                    </dd>
+                                                </div>
+                                                <div class="min-w-0">
+                                                    <dt
+                                                        class="mb-1 text-xs text-muted-foreground"
+                                                    >
+                                                        First name
+                                                    </dt>
+                                                    <dd
+                                                        class="text-sm font-medium [overflow-wrap:anywhere]"
+                                                    >
+                                                        {{
+                                                            passenger.first_name ||
+                                                            passenger.firstname ||
+                                                            '—'
+                                                        }}
+                                                    </dd>
+                                                </div>
+                                                <div class="min-w-0">
+                                                    <dt
+                                                        class="mb-1 text-xs text-muted-foreground"
+                                                    >
+                                                        Last name
+                                                    </dt>
+                                                    <dd
+                                                        class="text-sm font-medium [overflow-wrap:anywhere]"
+                                                    >
+                                                        {{
+                                                            passenger.last_name ||
+                                                            passenger.lastname ||
+                                                            '—'
+                                                        }}
+                                                    </dd>
+                                                </div>
+                                            </dl>
+                                            <EntryFieldValue
+                                                v-else
+                                                :value="passenger"
+                                            />
+                                        </div>
+                                    </li>
+                                </ol>
+                                <EntryFieldValue
+                                    v-else
+                                    :value="namesFieldDisplay.value"
+                                />
+                            </div>
+                            <p
+                                v-if="
+                                    !contactFields.length && !namesFieldDisplay
+                                "
+                                class="py-2 text-sm text-muted-foreground"
+                            >
+                                No contact or passenger information was
+                                provided.
+                            </p>
+                        </CardContent>
+                    </Card>
 
-                    <!-- Complex Value (Object/JSON) - Fallback for non-passenger objects -->
-                    <div v-else-if="namesFieldDisplay.isComplex" class="pl-4">
-                      <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                        <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(namesFieldDisplay.value, null, 2) }}</pre>
-                      </div>
-                    </div>
-                  </div>
+                    <Card
+                        v-if="travelFields.length || flightFields.length"
+                        id="travel-details"
+                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    >
+                        <CardHeader class="border-b border-border pb-5">
+                            <h2
+                                class="flex items-center gap-2 text-base font-semibold"
+                            >
+                                <Plane class="h-4 w-4 text-muted-foreground" />
+                                Travel details
+                            </h2>
+                            <CardDescription
+                                >Requested route, travel dates, and selected
+                                flights.</CardDescription
+                            >
+                        </CardHeader>
+                        <CardContent class="min-w-0 space-y-6 pt-5">
+                            <div
+                                v-if="travelFields.length"
+                                class="grid min-w-0 gap-3 sm:grid-cols-2"
+                            >
+                                <EntryField
+                                    v-for="field in travelFields"
+                                    :key="field.key"
+                                    :field="field"
+                                    :copied-field="copiedField"
+                                    @copy="copyToClipboard"
+                                />
+                            </div>
+                            <section
+                                v-for="field in flightFields"
+                                :key="field.key"
+                                class="min-w-0 space-y-3"
+                            >
+                                <div
+                                    class="flex min-w-0 items-start justify-between gap-3"
+                                >
+                                    <h3
+                                        class="min-w-0 text-sm font-medium [overflow-wrap:anywhere]"
+                                    >
+                                        {{
+                                            flightFields.length > 1
+                                                ? field.label
+                                                : 'Flight itinerary'
+                                        }}
+                                    </h3>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        class="h-7 w-7 shrink-0"
+                                        :aria-label="`Copy ${field.label}`"
+                                        title="Copy flight data"
+                                        @click="
+                                            copyToClipboard(
+                                                field.value,
+                                                field.key,
+                                            )
+                                        "
+                                    >
+                                        <CheckCircle2
+                                            v-if="copiedField === field.key"
+                                            class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                                        /><Copy v-else class="h-3.5 w-3.5" />
+                                    </Button>
+                                </div>
+                                <FlightCard
+                                    :flight-data="
+                                        ensureParsedFlightData(field.value)
+                                    "
+                                />
+                            </section>
+                        </CardContent>
+                    </Card>
+
+                    <Card
+                        id="additional-details"
+                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    >
+                        <CardHeader
+                            class="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5"
+                        >
+                            <div class="space-y-1.5">
+                                <h2
+                                    class="flex items-center gap-2 text-base font-semibold"
+                                >
+                                    <FileText
+                                        class="h-4 w-4 text-muted-foreground"
+                                    />
+                                    Additional information
+                                </h2>
+                                <CardDescription
+                                    >Other answers submitted with this
+                                    form.</CardDescription
+                                >
+                            </div>
+                            <label
+                                class="flex cursor-pointer items-center gap-2 py-1 text-xs text-muted-foreground"
+                            >
+                                <input
+                                    v-model="showEmptyFields"
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-input accent-primary"
+                                />
+                                Show empty fields
+                            </label>
+                        </CardHeader>
+                        <CardContent class="pt-5">
+                            <div
+                                v-if="additionalFields.length"
+                                class="grid min-w-0 gap-3 sm:grid-cols-2"
+                            >
+                                <EntryField
+                                    v-for="field in additionalFields"
+                                    :key="field.key"
+                                    :field="field"
+                                    :copied-field="copiedField"
+                                    @copy="copyToClipboard"
+                                />
+                            </div>
+                            <p
+                                v-else
+                                class="py-2 text-sm text-muted-foreground"
+                            >
+                                No additional information
+                                {{
+                                    showEmptyFields
+                                        ? 'was submitted.'
+                                        : 'to display. Enable “Show empty fields” to include unanswered fields.'
+                                }}
+                            </p>
+                        </CardContent>
+                    </Card>
                 </div>
 
-                <!-- Generate Amadeus Code Section (if basic flight fields exist but no flight JSON) -->
-                <div v-if="hasFlightData && !formFields.some(f => f.isFlight === true)" class="p-4 rounded-lg border bg-card">
-                  <div class="space-y-4">
-                    <div>
-                      <h4 class="text-sm font-semibold mb-1">Generate Dummy Ticket Code</h4>
-                      <p class="text-xs text-muted-foreground mb-4 break-words">
-                        Generate a full Amadeus-style dummy ticket command block for sellingplatformconnect
-                      </p>
-                      <div v-if="entry.amadeus_command_block" class="mb-4 space-y-3">
-                        <div class="relative rounded-lg border bg-muted/20 p-4 overflow-x-auto">
-                          <pre class="text-xs font-mono whitespace-pre-wrap break-words">{{ entry.amadeus_command_block }}</pre>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <Button
+                <aside
+                    class="min-w-0 space-y-6"
+                    aria-label="Booking tools and submission information"
+                >
+                    <Card
+                        id="booking-tools"
+                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    >
+                        <CardHeader class="border-b border-border pb-5">
+                            <h2
+                                class="flex items-center gap-2 text-base font-semibold"
+                            >
+                                <Ticket class="h-4 w-4 text-muted-foreground" />
+                                Booking tools
+                            </h2>
+                            <CardDescription
+                                >PNR, ticket code, and
+                                documents.</CardDescription
+                            >
+                        </CardHeader>
+                        <CardContent class="min-w-0 space-y-5 pt-5">
+                            <section
+                                class="space-y-3"
+                                aria-labelledby="pnr-heading"
+                            >
+                                <div
+                                    class="flex items-center justify-between gap-3"
+                                >
+                                    <h3
+                                        id="pnr-heading"
+                                        class="text-sm font-medium"
+                                    >
+                                        PNR confirmation
+                                    </h3>
+                                    <span
+                                        v-if="!entry.pnr"
+                                        class="text-xs text-muted-foreground"
+                                        >Not generated</span
+                                    >
+                                </div>
+                                <div v-if="entry.pnr" class="space-y-3">
+                                    <div
+                                        class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4"
+                                    >
+                                        <div class="min-w-0">
+                                            <p
+                                                class="font-mono text-xl font-semibold tracking-widest [overflow-wrap:anywhere]"
+                                            >
+                                                {{ entry.pnr }}
+                                            </p>
+                                            <p
+                                                v-if="entry.pnr_source"
+                                                class="mt-1 text-xs text-muted-foreground"
+                                            >
+                                                {{
+                                                    entry.pnr_source ===
+                                                    'amadeus_direct'
+                                                        ? 'Direct'
+                                                        : 'Search'
+                                                }}
+                                                booking
+                                            </p>
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            class="h-8 w-8 shrink-0"
+                                            aria-label="Copy PNR"
+                                            @click="
+                                                copyToClipboard(
+                                                    entry.pnr,
+                                                    'pnr',
+                                                )
+                                            "
+                                            ><CheckCircle2
+                                                v-if="copiedField === 'pnr'"
+                                                class="h-4 w-4 text-emerald-600 dark:text-emerald-400" /><Copy
+                                                v-else
+                                                class="h-4 w-4"
+                                        /></Button>
+                                    </div>
+                                    <div
+                                        v-if="entryPdfs.length"
+                                        class="space-y-2"
+                                    >
+                                        <Button
+                                            v-for="(pdf, index) in entryPdfs"
+                                            :key="index"
+                                            variant="outline"
+                                            size="sm"
+                                            class="h-auto min-h-9 w-full justify-start gap-2 py-2 text-left whitespace-normal"
+                                            @click="openUrl(pdf.url)"
+                                            ><Download
+                                                class="h-4 w-4 shrink-0"
+                                            /><span
+                                                class="min-w-0 [overflow-wrap:anywhere]"
+                                                >Download
+                                                {{
+                                                    pdf.passenger_name ||
+                                                    `PDF ${index + 1}`
+                                                }}</span
+                                            ></Button
+                                        >
+                                    </div>
+                                    <Button
+                                        v-else-if="entry.pnr_pdf_path"
+                                        variant="outline"
+                                        size="sm"
+                                        class="w-full gap-2"
+                                        @click="downloadPdf"
+                                        ><Download class="h-4 w-4" /> Download
+                                        PDF</Button
+                                    >
+                                </div>
+                                <Button
+                                    :disabled="
+                                        isGeneratingPnr ||
+                                        !hasFlightData ||
+                                        !!entry.pnr
+                                    "
+                                    :variant="entry.pnr ? 'outline' : 'default'"
+                                    class="w-full gap-2"
+                                    @click="generatePnr"
+                                >
+                                    <Loader2
+                                        v-if="isGeneratingPnr"
+                                        class="h-4 w-4 animate-spin"
+                                    /><CheckCircle2
+                                        v-else-if="entry.pnr"
+                                        class="h-4 w-4"
+                                    /><Ticket v-else class="h-4 w-4" />
+                                    {{
+                                        isGeneratingPnr
+                                            ? 'Generating PNR…'
+                                            : entry.pnr
+                                              ? 'PNR generated'
+                                              : 'Generate PNR'
+                                    }}
+                                </Button>
+                                <p
+                                    v-if="entry.pnr_generated_at"
+                                    class="text-xs leading-relaxed text-muted-foreground"
+                                >
+                                    Generated
+                                    {{ formatDate(entry.pnr_generated_at) }}
+                                </p>
+                            </section>
+                            <section
+                                class="min-w-0 space-y-3 border-t border-border pt-5"
+                                aria-labelledby="ticket-code-heading"
+                            >
+                                <div
+                                    class="flex flex-wrap items-center justify-between gap-2"
+                                >
+                                    <h3
+                                        id="ticket-code-heading"
+                                        class="text-sm font-medium"
+                                    >
+                                        Dummy ticket code
+                                    </h3>
+                                    <span
+                                        v-if="!entry.amadeus_command_block"
+                                        class="text-xs text-muted-foreground"
+                                        >Not generated</span
+                                    >
+                                </div>
+                                <p
+                                    class="text-xs leading-relaxed text-muted-foreground"
+                                >
+                                    Amadeus command block for this itinerary.
+                                </p>
+                                <div
+                                    v-if="entry.amadeus_command_block"
+                                    class="min-w-0 space-y-2"
+                                >
+                                    <pre
+                                        class="max-h-56 min-w-0 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap"
+                                        >{{ entry.amadeus_command_block }}</pre
+                                    >
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        class="w-full gap-2"
+                                        @click="
+                                            copyToClipboard(
+                                                entry.amadeus_command_block,
+                                                'amadeus_command_block',
+                                            )
+                                        "
+                                        ><CheckCircle2
+                                            v-if="
+                                                copiedField ===
+                                                'amadeus_command_block'
+                                            "
+                                            class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                                        /><Copy v-else class="h-3.5 w-3.5" />{{
+                                            copiedField ===
+                                            'amadeus_command_block'
+                                                ? 'Copied!'
+                                                : 'Copy all code'
+                                        }}</Button
+                                    >
+                                </div>
+                                <Button
+                                    :disabled="
+                                        isGeneratingAmadeusCode ||
+                                        !hasFlightData
+                                    "
+                                    variant="outline"
+                                    class="w-full gap-2"
+                                    @click="generateAmadeusCode"
+                                    ><Loader2
+                                        v-if="isGeneratingAmadeusCode"
+                                        class="h-4 w-4 animate-spin"
+                                    /><Code v-else class="h-4 w-4" />{{
+                                        isGeneratingAmadeusCode
+                                            ? 'Generating code…'
+                                            : entry.amadeus_command_block
+                                              ? 'Regenerate code'
+                                              : 'Generate dummy ticket code'
+                                    }}</Button
+                                >
+                                <p
+                                    v-if="entry.amadeus_generated_at"
+                                    class="text-xs leading-relaxed text-muted-foreground"
+                                >
+                                    Generated
+                                    {{ formatDate(entry.amadeus_generated_at) }}
+                                </p>
+                            </section>
+                            <p
+                                v-if="!hasFlightData"
+                                class="flex items-start gap-2 rounded-lg bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground"
+                            >
+                                <AlertCircle
+                                    class="mt-0.5 h-4 w-4 shrink-0"
+                                />Flight details are required to generate a PNR
+                                or ticket code.
+                            </p>
+                        </CardContent>
+                    </Card>
+
+                    <Card class="min-w-0 gap-0 shadow-none">
+                        <CardHeader class="pb-4"
+                            ><h2
+                                class="flex items-center gap-2 text-base font-semibold"
+                            >
+                                <ClipboardList
+                                    class="h-4 w-4 text-muted-foreground"
+                                />
+                                Submission information
+                            </h2></CardHeader
+                        >
+                        <CardContent class="min-w-0 space-y-4">
+                            <dl class="divide-y divide-border text-sm">
+                                <div
+                                    class="flex flex-wrap justify-between gap-2 pb-3"
+                                >
+                                    <dt class="text-muted-foreground">
+                                        Submission ID
+                                    </dt>
+                                    <dd class="font-medium">
+                                        #{{
+                                            submissionMeta.serialNumber ||
+                                            entry.entry_id
+                                        }}
+                                    </dd>
+                                </div>
+                                <div
+                                    class="flex flex-wrap justify-between gap-2 py-3"
+                                >
+                                    <dt class="text-muted-foreground">
+                                        Form ID
+                                    </dt>
+                                    <dd class="font-medium">
+                                        {{ entry.form_id }}
+                                    </dd>
+                                </div>
+                                <div
+                                    class="flex flex-wrap justify-between gap-2 py-3"
+                                >
+                                    <dt class="text-muted-foreground">
+                                        Fields displayed
+                                    </dt>
+                                    <dd class="font-medium tabular-nums">
+                                        {{ formFields.length }}
+                                    </dd>
+                                </div>
+                            </dl>
+                            <details
+                                v-if="technicalMetadata.length"
+                                class="group min-w-0 rounded-lg border border-border"
+                            >
+                                <summary
+                                    class="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-sm font-medium [&::-webkit-details-marker]:hidden"
+                                >
+                                    Technical details<ChevronDown
+                                        class="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
+                                    />
+                                </summary>
+                                <dl
+                                    class="min-w-0 space-y-3 border-t border-border p-3"
+                                >
+                                    <div
+                                        v-for="item in technicalMetadata"
+                                        :key="item.label"
+                                        class="min-w-0"
+                                    >
+                                        <dt
+                                            class="mb-1 text-xs text-muted-foreground"
+                                        >
+                                            {{ item.label }}
+                                        </dt>
+                                        <dd class="min-w-0">
+                                            <a
+                                                v-if="
+                                                    item.label === 'IP address'
+                                                "
+                                                :href="`https://whois.domaintools.com/${item.value}`"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="text-sm [overflow-wrap:anywhere] hover:underline"
+                                                >{{ item.value }}</a
+                                            ><EntryFieldValue
+                                                v-else
+                                                :value="item.value"
+                                            />
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </details>
+                            <div class="border-t border-border pt-4">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    :disabled="isDeleting"
+                                    class="w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                    @click="deleteEntry"
+                                    ><Loader2
+                                        v-if="isDeleting"
+                                        class="h-4 w-4 animate-spin"
+                                    /><Trash2 v-else class="h-4 w-4" />{{
+                                        isDeleting
+                                            ? 'Deleting…'
+                                            : 'Delete entry'
+                                    }}</Button
+                                >
+                            </div>
+                        </CardContent>
+                    </Card>
+                </aside>
+            </div>
+
+            <details
+                class="group min-w-0 rounded-xl border border-border bg-card text-card-foreground"
+                @toggle="showRawPayload = ($event.target as HTMLDetailsElement).open"
+            >
+                <summary
+                    class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:px-6 [&::-webkit-details-marker]:hidden"
+                >
+                    <span class="flex items-center gap-2 text-sm font-medium"
+                        ><Code class="h-4 w-4 text-muted-foreground" /> Raw
+                        submission data</span
+                    ><ChevronDown
+                        class="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
+                    />
+                </summary>
+                <div
+                    v-if="showRawPayload"
+                    class="min-w-0 space-y-3 border-t border-border p-4 sm:p-6"
+                >
+                    <div
+                        class="flex flex-wrap items-center justify-between gap-3"
+                    >
+                        <p class="text-xs text-muted-foreground">
+                            Complete original payload from Fluent Forms.
+                        </p>
+                        <Button
                             variant="outline"
                             size="sm"
-                            @click="copyToClipboard(entry.amadeus_command_block, 'amadeus_command_block')"
-                            class="flex-1"
-                          >
-                            <CheckCircle2 v-if="copiedField === 'amadeus_command_block'" class="mr-2 h-4 w-4 text-green-500" />
-                            <Copy v-else class="mr-2 h-4 w-4" />
-                            {{ copiedField === 'amadeus_command_block' ? 'Copied!' : 'Copy All' }}
-                          </Button>
-                        </div>
-                        <span v-if="entry.amadeus_generated_at" class="text-xs text-muted-foreground block break-words">
-                          Generated {{ formatDate(entry.amadeus_generated_at) }}
-                        </span>
-                      </div>
+                            class="gap-2"
+                            @click="
+                                copyToClipboard(entry.payload, 'raw_payload')
+                            "
+                            ><CheckCircle2
+                                v-if="copiedField === 'raw_payload'"
+                                class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                            /><Copy v-else class="h-3.5 w-3.5" />Copy
+                            JSON</Button
+                        >
                     </div>
-                    <Button
-                      :disabled="isGeneratingAmadeusCode"
-                      @click="generateAmadeusCode"
-                      :variant="entry.amadeus_command_block ? 'outline' : 'default'"
-                      class="w-full"
+                    <pre
+                        class="max-h-96 min-w-0 overflow-auto rounded-lg bg-muted/30 p-4 font-mono text-xs leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap"
+                        >{{ JSON.stringify(entry.payload, null, 2) }}</pre
                     >
-                      <Loader2 v-if="isGeneratingAmadeusCode" class="mr-2 h-4 w-4 animate-spin" />
-                      <Ticket v-else class="mr-2 h-4 w-4" />
-                      <span class="hidden sm:inline">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Dummy Ticket Code' : 'Generate Dummy Ticket Code') }}</span>
-                      <span class="sm:hidden">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate' : 'Generate Code') }}</span>
-                    </Button>
-                  </div>
                 </div>
-
-                <!-- Remaining Fields -->
-                <template v-for="field in remainingFields" :key="field.key">
-                  <!-- Flight JSON Data (Custom UI) - Display with card component -->
-                  <div
-                    v-if="field.isFlight === true"
-                    class="space-y-3"
-                  >
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ field.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(field.value, field.key)"
-                          :title="copiedField === field.key ? 'Copied!' : 'Copy flight data'"
-                        >
-                          <CheckCircle2 v-if="copiedField === field.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                    <FlightCard 
-                      :flight-data="ensureParsedFlightData(field.value)" 
-                    />
-                    
-                    <!-- Generate Amadeus Code Button -->
-                    <div class="pt-4 border-t">
-                      <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-4">
-                        <div class="flex-1 min-w-0">
-                          <h4 class="text-sm font-semibold mb-1">Dummy Ticket Code</h4>
-                          <p class="text-xs text-muted-foreground">
-                            Generate a full Amadeus-style dummy ticket command block
-                          </p>
-                          <div v-if="entry.amadeus_command_block" class="mt-3 space-y-2">
-                            <div class="relative rounded-lg border bg-muted/20 p-3 max-h-48 overflow-y-auto">
-                              <pre class="text-xs font-mono whitespace-pre-wrap break-words">{{ entry.amadeus_command_block }}</pre>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              @click="copyToClipboard(entry.amadeus_command_block, 'amadeus_command_block')"
-                              class="w-full"
-                            >
-                              <CheckCircle2 v-if="copiedField === 'amadeus_command_block'" class="mr-2 h-3 w-3 text-green-500" />
-                              <Copy v-else class="mr-2 h-3 w-3" />
-                              {{ copiedField === 'amadeus_command_block' ? 'Copied!' : 'Copy All' }}
-                            </Button>
-                            <span v-if="entry.amadeus_generated_at" class="text-xs text-muted-foreground block">
-                              Generated {{ formatDate(entry.amadeus_generated_at) }}
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          :disabled="isGeneratingAmadeusCode || !hasFlightData"
-                          @click="generateAmadeusCode"
-                          :variant="entry.amadeus_command_block ? 'outline' : 'default'"
-                          class="w-full sm:w-auto flex-shrink-0"
-                        >
-                          <Loader2 v-if="isGeneratingAmadeusCode" class="mr-2 h-4 w-4 animate-spin" />
-                          <Ticket v-else class="mr-2 h-4 w-4" />
-                          <span class="hidden sm:inline">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Code' : 'Generate Dummy Ticket Code') }}</span>
-                          <span class="sm:hidden">{{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate' : 'Generate Code') }}</span>
-                        </Button>
-                      </div>
-                      <div v-if="!hasFlightData" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                        <AlertCircle class="h-3 w-3 flex-shrink-0" />
-                        <span>Insufficient flight data to generate ticket</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <!-- Other field types - Display with field label wrapper -->
-                  <div
-                    v-else
-                    class="p-3 sm:p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
-                  >
-                    <div class="space-y-3">
-                      <div class="flex items-start justify-between gap-2 sm:gap-4">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                          <p class="text-sm font-semibold text-muted-foreground tracking-wide break-words">
-                            {{ field.label }}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 w-8 p-0 flex-shrink-0"
-                          @click="copyToClipboard(field.value, field.key)"
-                          :title="copiedField === field.key ? 'Copied!' : 'Copy value'"
-                        >
-                          <CheckCircle2 v-if="copiedField === field.key" class="h-4 w-4 text-green-500" />
-                          <Copy v-else class="h-4 w-4" />
-                        </Button>
-                      </div>
-                      
-                      <!-- Simple Value (String) -->
-                      <div v-if="!field.isComplex && !field.isArray" class="pl-4">
-                        <a
-                          v-if="field.isEmail"
-                          :href="`mailto:${field.value}`"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ field.value }}
-                        </a>
-                        <a
-                          v-else-if="field.isUrl"
-                          :href="field.value"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-base font-medium text-primary hover:underline break-words block"
-                        >
-                          {{ field.value }}
-                        </a>
-                        <p v-else class="text-base font-medium text-foreground break-words whitespace-pre-wrap">
-                          {{ field.value || '(empty)' }}
-                        </p>
-                      </div>
-
-                      <!-- Array Value -->
-                      <div v-else-if="field.isArray" class="pl-4">
-                        <div class="space-y-2">
-                          <div
-                            v-for="(item, index) in field.value"
-                            :key="index"
-                            class="p-2 rounded border bg-muted/20 text-sm font-medium"
-                            :class="typeof item === 'object' ? 'max-h-64 overflow-y-auto' : ''"
-                          >
-                            <template v-if="typeof item === 'object'">
-                              <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(item, null, 2) }}</pre>
-                            </template>
-                            <template v-else>
-                              {{ item }}
-                            </template>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Complex Value (Object/JSON) - Fallback for non-flight JSON -->
-                      <div v-else-if="field.isComplex" class="pl-4">
-                        <div class="relative rounded-lg border bg-muted/20 p-3 max-h-64 overflow-y-auto">
-                          <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono text-foreground">{{ JSON.stringify(field.value, null, 2) }}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              
-              <!-- Empty State -->
-              <div v-else class="text-center py-12">
-                <FileText class="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                <p class="text-sm font-medium text-muted-foreground mb-1">No form fields available</p>
-                <p class="text-xs text-muted-foreground">
-                  {{ showEmptyFields ? 'No fields found in response data' : 'Enable "Show empty fields" to see all fields' }}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <!-- Raw Payload -->
-          <Card>
-            <CardHeader>
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div class="flex-1 min-w-0">
-                  <CardTitle class="flex items-center gap-2 flex-wrap">
-                    <Code class="h-5 w-5 flex-shrink-0" />
-                    <span class="break-words">Raw Payload</span>
-                  </CardTitle>
-                  <CardDescription class="break-words">Complete entry data from Fluent Forms</CardDescription>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  @click="showRawPayload = !showRawPayload"
-                  class="w-full sm:w-auto"
-                >
-                  <Eye v-if="!showRawPayload" class="mr-2 h-4 w-4" />
-                  <EyeOff v-else class="mr-2 h-4 w-4" />
-                  {{ showRawPayload ? 'Hide' : 'Show' }} Payload
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent v-if="showRawPayload">
-              <div class="relative rounded-lg border bg-muted/20 p-4 max-h-96 overflow-y-auto">
-                <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">{{ JSON.stringify(entry.payload, null, 2) }}</pre>
-              </div>
-            </CardContent>
-            <CardContent v-else>
-              <div class="text-center py-6 text-muted-foreground">
-                <Code class="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p class="text-sm">Click "Show Payload" to view the complete raw data</p>
-              </div>
-            </CardContent>
-          </Card>
+            </details>
         </div>
-
-        <!-- Right Column: Submission Info -->
-        <div class="lg:col-span-1 space-y-6 order-1 lg:order-2">
-          <!-- Submission Information -->
-          <Card>
-            <CardHeader>
-              <CardTitle class="flex items-center gap-2">
-                <ClipboardList class="h-5 w-5" />
-                Submission Info
-              </CardTitle>
-              <CardDescription>Entry details and metadata</CardDescription>
-            </CardHeader>
-            <CardContent class="space-y-3">
-              <!-- Submission ID -->
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Hash class="h-3.5 w-3.5" />
-                  Submission ID
-                </div>
-                <p class="text-sm font-bold text-foreground break-words sm:text-right w-full sm:w-auto">
-                  #{{ submissionMeta.serialNumber || entry.entry_id }}
-                </p>
-              </div>
-
-              <!-- Form ID -->
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <FileText class="h-3.5 w-3.5" />
-                  Form ID
-                </div>
-                <p class="text-sm font-semibold text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ entry.form_id }}
-                </p>
-              </div>
-
-              <!-- Website -->
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Globe class="h-3.5 w-3.5" />
-                  Website
-                </div>
-                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ entry.website.name }}
-                </p>
-              </div>
-
-              <!-- User IP -->
-              <div v-if="submissionMeta.userIP" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Hash class="h-3.5 w-3.5" />
-                  User IP
-                </div>
-                <a
-                  :href="`https://whois.domaintools.com/${submissionMeta.userIP}`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right w-full sm:w-auto"
-                >
-                  {{ submissionMeta.userIP }}
-                </a>
-              </div>
-
-              <!-- Source URL -->
-              <div v-if="submissionMeta.sourceURL" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Globe class="h-3.5 w-3.5" />
-                  Source URL
-                </div>
-                <a
-                  :href="submissionMeta.sourceURL"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right sm:max-w-[60%] w-full sm:w-auto"
-                >
-                  {{ submissionMeta.sourceURL }}
-                </a>
-              </div>
-
-              <!-- Browser -->
-              <div v-if="submissionMeta.browser" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Globe class="h-3.5 w-3.5" />
-                  Browser
-                </div>
-                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ submissionMeta.browser }}
-                </p>
-              </div>
-
-              <!-- Device / OS -->
-              <div v-if="submissionMeta.device" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Hash class="h-3.5 w-3.5" />
-                  Device / OS
-                </div>
-                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ submissionMeta.device }}
-                </p>
-              </div>
-
-              <!-- User -->
-              <div v-if="submissionMeta.user" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Hash class="h-3.5 w-3.5" />
-                  User
-                </div>
-                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ submissionMeta.user }}
-                </p>
-              </div>
-
-              <!-- Status -->
-              <div v-if="submissionMeta.status" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Hash class="h-3.5 w-3.5" />
-                  Status
-                </div>
-                <Badge variant="outline" class="font-semibold text-xs w-full sm:w-auto justify-center sm:justify-start">
-                  {{ submissionMeta.status }}
-                </Badge>
-              </div>
-
-              <!-- Email -->
-              <div v-if="entry.email" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Mail class="h-3.5 w-3.5" />
-                  E-mail
-                </div>
-                <a
-                  :href="`mailto:${entry.email}`"
-                  class="text-sm font-medium text-primary hover:underline break-words sm:text-right sm:max-w-[60%] w-full sm:w-auto"
-                >
-                  {{ entry.email }}
-                </a>
-              </div>
-
-              <!-- Submission Date -->
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pb-3 border-b">
-                <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                  <Calendar class="h-3.5 w-3.5" />
-                  Submitted On
-                </div>
-                <p class="text-sm font-medium text-foreground break-words sm:text-right w-full sm:w-auto">
-                  {{ formatDate(entry.created_at_wp) }}
-                </p>
-              </div>
-
-              <!-- PNR Section -->
-              <div class="pt-3 space-y-3 border-t">
-                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4">
-                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                    <Ticket class="h-3.5 w-3.5" />
-                    PNR
-                  </div>
-                  <Badge v-if="!entry.pnr" variant="outline" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
-                    Not Generated
-                  </Badge>
-                  <Badge v-else variant="default" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
-                    {{ entry.pnr }}
-                  </Badge>
-                </div>
-                <div v-if="entry.pnr" class="mb-3 space-y-2">
-                  <div class="p-3 rounded-lg border bg-muted/20">
-                    <div class="text-xs text-muted-foreground mb-1">Confirmation Number</div>
-                    <div class="text-sm font-bold font-mono">{{ entry.pnr }}</div>
-                    <div v-if="entry.pnr_source" class="text-xs text-muted-foreground mt-1">
-                      Source: {{ entry.pnr_source === 'amadeus_direct' ? 'Direct' : 'Search' }}
-                    </div>
-                  </div>
-                  <!-- Multiple PDFs (new format) -->
-                  <div v-if="entryPdfs.length > 0" class="space-y-2 w-full">
-                    <div v-for="(pdf, index) in entryPdfs" :key="index" class="w-full">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        @click="() => openUrl(pdf.url)"
-                        class="w-full"
-                      >
-                        <Download class="mr-2 h-3 w-3" />
-                        Download {{ pdf.passenger_name || `PDF ${index + 1}` }}
-                      </Button>
-                    </div>
-                  </div>
-                  <!-- Single PDF (backward compatibility) -->
-                  <Button
-                    v-else-if="entry.pnr_pdf_path"
-                    variant="outline"
-                    size="sm"
-                    @click="downloadPdf"
-                    class="w-full"
-                  >
-                    <FileText class="mr-2 h-3 w-3" />
-                    Download PDF
-                  </Button>
-                </div>
-                <Button
-                  :disabled="isGeneratingPnr || !hasFlightData || !!entry.pnr"
-                  @click="generatePnr"
-                  :variant="entry.pnr ? 'outline' : 'default'"
-                  class="w-full"
-                  size="sm"
-                >
-                  <Loader2 v-if="isGeneratingPnr" class="mr-2 h-3 w-3 animate-spin" />
-                  <Ticket v-else class="mr-2 h-3 w-3" />
-                  {{ isGeneratingPnr ? 'Generating...' : (entry.pnr ? 'PNR Generated' : 'Generate PNR') }}
-                </Button>
-                <p v-if="!hasFlightData" class="text-xs text-muted-foreground flex items-center gap-1">
-                  <AlertCircle class="h-3 w-3" />
-                  Insufficient flight data
-                </p>
-                <p v-if="entry.pnr_generated_at" class="text-xs text-muted-foreground">
-                  Generated {{ formatDate(entry.pnr_generated_at) }}
-                </p>
-              </div>
-
-              <!-- Amadeus Code Section -->
-              <div class="pt-3 space-y-3 border-t">
-                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4">
-                  <div class="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex-shrink-0">
-                    <Ticket class="h-3.5 w-3.5" />
-                    Dummy Ticket Code
-                  </div>
-                  <Badge v-if="!entry.amadeus_command_block" variant="outline" class="text-xs w-full sm:w-auto justify-center sm:justify-start">
-                    Not Generated
-                  </Badge>
-                </div>
-                <div v-if="entry.amadeus_command_block" class="mb-3 space-y-2">
-                  <div class="relative rounded-lg border bg-muted/20 p-2 max-h-32 overflow-y-auto">
-                    <pre class="text-xs font-mono whitespace-pre-wrap break-words">{{ entry.amadeus_command_block }}</pre>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    @click="copyToClipboard(entry.amadeus_command_block, 'amadeus_command_block')"
-                    class="w-full"
-                  >
-                    <CheckCircle2 v-if="copiedField === 'amadeus_command_block'" class="mr-2 h-3 w-3 text-green-500" />
-                    <Copy v-else class="mr-2 h-3 w-3" />
-                    {{ copiedField === 'amadeus_command_block' ? 'Copied!' : 'Copy All' }}
-                  </Button>
-                </div>
-                <Button
-                  :disabled="isGeneratingAmadeusCode || !hasFlightData"
-                  @click="generateAmadeusCode"
-                  :variant="entry.amadeus_command_block ? 'outline' : 'default'"
-                  class="w-full"
-                  size="sm"
-                >
-                  <Loader2 v-if="isGeneratingAmadeusCode" class="mr-2 h-3 w-3 animate-spin" />
-                  <Ticket v-else class="mr-2 h-3 w-3" />
-                  {{ isGeneratingAmadeusCode ? 'Generating...' : (entry.amadeus_command_block ? 'Regenerate Code' : 'Generate Dummy Ticket Code') }}
-                </Button>
-                <p v-if="!hasFlightData" class="text-xs text-muted-foreground flex items-center gap-1">
-                  <AlertCircle class="h-3 w-3" />
-                  Insufficient flight data
-                </p>
-                <p v-if="entry.amadeus_generated_at" class="text-xs text-muted-foreground">
-                  Generated {{ formatDate(entry.amadeus_generated_at) }}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <!-- Quick Stats -->
-          <Card>
-            <CardHeader>
-              <CardTitle>Statistics</CardTitle>
-              <CardDescription>Entry summary</CardDescription>
-            </CardHeader>
-            <CardContent class="space-y-3">
-              <div class="flex justify-between items-center p-3 rounded-lg bg-muted/30">
-                <span class="text-sm font-medium text-muted-foreground">Form Fields</span>
-                <Badge variant="outline" class="font-semibold">
-                  {{ formFields.length }}
-                </Badge>
-              </div>
-              <div v-if="submissionMeta.status" class="flex justify-between items-center p-3 rounded-lg bg-muted/30">
-                <span class="text-sm font-medium text-muted-foreground">Status</span>
-                <Badge variant="outline" class="font-semibold">
-                  {{ submissionMeta.status }}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  </AppLayout>
+    </AppLayout>
 </template>
