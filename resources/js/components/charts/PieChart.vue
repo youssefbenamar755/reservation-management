@@ -62,12 +62,15 @@ const chartData = computed(() => {
 })
 
 const chartOptions = computed<ChartOptions<'pie'>>(() => {
-  const isDark = document.documentElement.classList.contains('dark')
+  const isDark =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('dark')
   const textColor = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)'
 
   return {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     plugins: {
       legend: {
         position: 'bottom',
@@ -110,4 +113,3 @@ const chartOptions = computed<ChartOptions<'pie'>>(() => {
     <Pie :data="chartData" :options="chartOptions" />
   </div>
 </template>
-

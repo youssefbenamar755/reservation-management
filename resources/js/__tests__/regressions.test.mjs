@@ -29,8 +29,8 @@ function loadModule(content, mocks = {}) {
   return module.exports
 }
 
-for (const name of ['RevenueChart', 'OrdersChart']) {
-  test(`${name} renders on the server and registers the fill plugin`, async () => {
+for (const name of ['RevenueChart', 'OrdersChart', 'BarChart', 'PieChart']) {
+  test(`${name} renders on the server with its required chart plugins`, async () => {
     const { Chart, Filler } = require('chart.js')
     const { createSSRApp } = require('vue')
     const { renderToString } = require('vue/server-renderer')
@@ -43,10 +43,13 @@ for (const name of ['RevenueChart', 'OrdersChart']) {
     })
     const component = loadModule(compiled.content).default
     const html = await renderToString(createSSRApp(component, {
-      data: [{ date: '2026-09-06', revenue: 50, count: 2 }],
+      data: [{ date: '2026-09-06', name: 'Website', revenue: 50, count: 2 }],
+      labelKey: 'name',
     }))
     assert.match(html, /<canvas/)
-    assert.equal(Chart.registry.getPlugin('filler'), Filler)
+    if (name === 'RevenueChart' || name === 'OrdersChart') {
+      assert.equal(Chart.registry.getPlugin('filler'), Filler)
+    }
   })
 }
 

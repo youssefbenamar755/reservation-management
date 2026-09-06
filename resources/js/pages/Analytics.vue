@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
-import { Head, router, usePage } from '@inertiajs/vue3'
-import { computed, ref } from 'vue'
+import { Head, router } from '@inertiajs/vue3'
+import { computed, ref, watch } from 'vue'
 import {
   Card,
   CardContent,
@@ -26,7 +26,6 @@ import {
   CreditCard,
   TrendingUp,
   TrendingDown,
-  Globe,
   Calendar,
   Filter,
   BarChart3,
@@ -98,7 +97,6 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const page = usePage()
 
 const breadcrumbs: BreadcrumbItem[] = [
   {
@@ -117,6 +115,21 @@ const selectedWebsiteIds = ref<number[]>(
 )
 const paymentStatus = ref(props.filters.payment_status || '')
 
+// Keep controls aligned with server-normalized filters and browser history while
+// retaining the existing chart instances during same-page visits.
+watch(() => props.filters, (filters) => {
+  startDate.value = filters.start_date
+  endDate.value = filters.end_date
+  selectedWebsiteIds.value = Array.isArray(filters.website_ids) ? filters.website_ids.map(Number) : []
+  paymentStatus.value = filters.payment_status || ''
+})
+
+const hourlyChartData = computed(() => props.ordersByHour.map((item) => ({
+  hour: formatHour(item.hour),
+  count: item.count,
+})))
+const weekdayChartData = computed(() => [...props.ordersByDayOfWeek].sort((a, b) => a.day_number - b.day_number))
+
 // Loading state
 const isLoading = ref(false)
 
@@ -124,6 +137,7 @@ const isLoading = ref(false)
 const lastRefresh = ref<Date>(new Date())
 
 function applyFilters() {
+  if (isLoading.value) return
   isLoading.value = true
   const params: Record<string, any> = {
     start_date: startDate.value,
@@ -139,11 +153,13 @@ function applyFilters() {
   }
 
   router.get('/analytics', params, {
-    preserveState: false,
+    preserveState: true,
     preserveScroll: false,
+    onSuccess: () => {
+      lastRefresh.value = new Date()
+    },
     onFinish: () => {
       isLoading.value = false
-      lastRefresh.value = new Date()
     },
   })
 }
@@ -153,6 +169,7 @@ function refreshData() {
 }
 
 function setDatePreset(preset: '7d' | '30d' | '90d' | 'thisMonth' | 'lastMonth' | 'thisYear') {
+  if (isLoading.value) return
   const today = new Date()
   const end = new Date(today)
   let start = new Date(today)
@@ -195,6 +212,7 @@ function formatLocalDate(date: Date): string {
 }
 
 function resetFilters() {
+  if (isLoading.value) return
   startDate.value = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     .toISOString()
     .split('T')[0]
@@ -661,7 +679,7 @@ function formatLastRefresh(date: Date): string {
           <CardContent>
             <BarChart
               v-if="ordersByHour.length > 0"
-              :data="ordersByHour.map((item) => ({ hour: formatHour(item.hour), count: item.count }))"
+              :data="hourlyChartData"
               label-key="hour"
               value-key="count"
               label="Orders"
@@ -684,7 +702,7 @@ function formatLastRefresh(date: Date): string {
           <CardContent>
             <BarChart
               v-if="ordersByDayOfWeek.length > 0"
-              :data="[...ordersByDayOfWeek].sort((a, b) => a.day_number - b.day_number)"
+              :data="weekdayChartData"
               label-key="day"
               value-key="count"
               label="Orders"
@@ -998,4 +1016,3 @@ function formatLastRefresh(date: Date): string {
   cursor: pointer;
 }
 </style>
-

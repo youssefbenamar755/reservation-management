@@ -54,13 +54,16 @@ const chartData = computed(() => {
 })
 
 const chartOptions = computed<ChartOptions<'bar'>>(() => {
-  const isDark = document.documentElement.classList.contains('dark')
+  const isDark =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('dark')
   const textColor = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)'
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
 
   return {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     plugins: {
       legend: {
         display: false,
@@ -107,4 +110,3 @@ const chartOptions = computed<ChartOptions<'bar'>>(() => {
     <Bar :data="chartData" :options="chartOptions" />
   </div>
 </template>
-
