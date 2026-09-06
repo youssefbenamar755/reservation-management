@@ -5,12 +5,13 @@ import { Head, router, usePage } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { Link } from '@inertiajs/vue3'
 import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import { useToast } from '@/composables/useToast'
 import { getEcho } from '@/lib/echo'
 import { runWooCommerceSync, summarizeWooCommerceSyncResults, type WooCommerceSyncCounts } from '@/lib/wooCommerceSync'
+import { createAutoRefresh, refreshOrdersSnapshot, type AutoRefreshState } from '@/lib/liveOrders'
 
 const props = defineProps<{
   orders: any
@@ -46,64 +47,148 @@ const toast = useToast()
 
 const { onNotification, offNotification } = useEchoNotifications()
 
+const online = ref(true)
+const visible = ref(true)
+const refreshState = ref<AutoRefreshState>({ refreshing: false, lastCheckedAt: null, hasError: false })
+const refreshLabel = computed(() => {
+  if (!online.value) return 'Offline — updates will resume automatically'
+  if (!visible.value) return 'Auto-refresh paused'
+  if (refreshState.value.hasError) return 'Auto-refresh retrying'
+  return refreshState.value.refreshing ? 'Updating orders…' : 'Auto-refresh on'
+})
+const lastChecked = computed(() => refreshState.value.lastCheckedAt === null
+  ? ''
+  : new Date(refreshState.value.lastCheckedAt).toLocaleTimeString())
+
+let mounted = false
+const navigationVisits = new Set<object>()
+const cleanupListeners: Array<() => void> = []
+let ordersEcho: Awaited<ReturnType<typeof getEcho>> = null
+let ordersChannelName: string | null = null
+
+const liveRefresh = createAutoRefresh({
+  isAvailable: () => mounted && online.value && visible.value,
+  onState: (state) => { refreshState.value = state },
+  refresh: ({ isCurrent, complete }) => {
+    const controller = new AbortController()
+    void refreshOrdersSnapshot({
+      getUrl: () => window.location.href,
+      isCurrent,
+      signal: controller.signal,
+      apply: (orders, stillCurrent) => new Promise<boolean>((resolve) => {
+        let applied = false
+        // replaceProp preserves URL, filters, scroll, and pagination. Its updater
+        // runs from Inertia's queue, so check the generation and URL again here.
+        router.replaceProp('orders', (currentOrders: unknown) => {
+          if (!stillCurrent()) return currentOrders
+          applied = true
+          return orders
+        }, { onFinish: () => resolve(applied) })
+      }),
+    }).then(complete)
+    return () => controller.abort()
+  },
+})
+
+function requestOrderRefresh(data?: any) {
+  const websiteId = data?.website_id ?? data?.data?.website_id
+  if (selectedWebsiteId.value && websiteId && String(websiteId) !== String(selectedWebsiteId.value)) return
+  liveRefresh.request()
+}
+
 const onOrderNotification = (data: any) => {
   if (data?.type === 'order') {
-    router.reload({ only: ['orders'] })
+    requestOrderRefresh(data)
     toast.success('New order received!')
   }
 }
 
-const onOrderReceived = () => {
-  router.reload({ only: ['orders'] })
+const onOrderReceived = (data: any) => {
+  requestOrderRefresh(data)
 }
 
-// --- Polling fallback (60s) in case Pusher / Echo is unavailable ---
-let pollingTimer: ReturnType<typeof setInterval> | null = null
-
-function startPolling() {
-  stopPolling()
-  pollingTimer = setInterval(() => {
-    if (!document.hidden && props.orders?.current_page === 1) {
-      router.reload({ only: ['orders'] })
-    }
-  }, 60_000)
+function updateAvailability() {
+  online.value = navigator.onLine
+  visible.value = !document.hidden
+  liveRefresh.availabilityChanged()
 }
 
-function stopPolling() {
-  if (pollingTimer !== null) {
-    clearInterval(pollingTimer)
-    pollingTimer = null
-  }
+function suspendForHistoryNavigation() {
+  liveRefresh.suspend()
 }
+
+// Query changes within this component must invalidate a previous snapshot too.
+watch(() => page.url, () => {
+  if (!mounted) return
+  liveRefresh.suspend()
+  if (navigationVisits.size === 0) liveRefresh.resume()
+}, { flush: 'sync' })
 
 onMounted(() => {
+  mounted = true
   const user = (page.props as any).auth?.user
   if (!user) return
+  online.value = navigator.onLine
+  visible.value = !document.hidden
+
+  cleanupListeners.push(
+    router.on('before', ({ detail: { visit } }) => {
+      if (visit.async) return
+      liveRefresh.suspend()
+      // A navigation cancelled by another listener has no start/finish event.
+      queueMicrotask(() => {
+        if (mounted && navigationVisits.size === 0) liveRefresh.resume()
+      })
+    }),
+    router.on('start', ({ detail: { visit } }) => {
+      if (visit.async) return
+      navigationVisits.add(visit)
+      liveRefresh.suspend()
+    }),
+    router.on('finish', ({ detail: { visit } }) => {
+      if (visit.async) return
+      navigationVisits.delete(visit)
+      if (mounted && navigationVisits.size === 0) liveRefresh.resume()
+    }),
+    router.on('navigate', () => {
+      if (mounted && navigationVisits.size === 0) liveRefresh.resume()
+    }),
+  )
+  document.addEventListener('visibilitychange', updateAvailability)
+  window.addEventListener('online', updateAvailability)
+  window.addEventListener('offline', updateAvailability)
+  window.addEventListener('focus', updateAvailability)
+  window.addEventListener('popstate', suspendForHistoryNavigation)
+
   try {
     onNotification('orders-index', onOrderNotification, user.id)
     getEcho()
       .then((echo) => {
-        if (!echo) return
-        echo
-          .private('orders')
+        if (!mounted || !echo) return
+        ordersEcho = echo
+        ordersChannelName = `orders.${user.id}`
+        echo.private(ordersChannelName)
           .listen('.order.received', onOrderReceived)
       })
       .catch(() => {})
   } catch (e) {
     console.error('Echo setup failed:', e)
   }
-  startPolling()
+  liveRefresh.start()
 })
 onUnmounted(() => {
+  mounted = false
+  liveRefresh.stop()
   syncAbortController?.abort()
   offNotification('orders-index')
-  getEcho()
-    .then((echo) => {
-      if (!echo) return
-      echo.leave('orders')
-    })
-    .catch(() => {})
-  stopPolling()
+  if (ordersEcho && ordersChannelName) ordersEcho.leave(ordersChannelName)
+  cleanupListeners.forEach((remove) => remove())
+  navigationVisits.clear()
+  document.removeEventListener('visibilitychange', updateAvailability)
+  window.removeEventListener('online', updateAvailability)
+  window.removeEventListener('offline', updateAvailability)
+  window.removeEventListener('focus', updateAvailability)
+  window.removeEventListener('popstate', suspendForHistoryNavigation)
 })
 
 async function syncOrdersFromWooCommerce() {
@@ -168,8 +253,7 @@ async function syncOrdersFromWooCommerce() {
   syncProgress.value = ''
   syncAbortController = null
 
-  // Reload the orders list once after all syncs are done
-  router.reload({ only: ['orders'] })
+  liveRefresh.request(0)
 
   if (errors.length === 0) {
     toast.success(summarizeWooCommerceSyncResults(syncResults, websiteId ? websites[0].name : 'All websites'))
@@ -268,6 +352,18 @@ function formatDate(dateString: string | null) {
     <div
       class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
     >
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h1 class="text-2xl font-bold">Orders</h1>
+        <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-label="Automatic order updates">
+          <span
+            aria-hidden="true"
+            class="h-2 w-2 rounded-full"
+            :class="!online || refreshState.hasError ? 'bg-amber-500' : 'bg-green-500'"
+          />
+          <span>{{ refreshLabel }}</span>
+          <span v-if="lastChecked">· Last checked {{ lastChecked }}</span>
+        </div>
+      </div>
 
       <!-- FILTERS -->
       <div
@@ -275,6 +371,7 @@ function formatDate(dateString: string | null) {
       >
         <select
           class="rounded-md border bg-background px-3 py-2 text-sm"
+          :value="props.filters.website_id || ''"
           @change="updateFilter('website_id', ($event.target as HTMLSelectElement).value)"
         >
           <option value="">All Websites</option>
@@ -285,6 +382,7 @@ function formatDate(dateString: string | null) {
 
         <select
           class="rounded-md border bg-background px-3 py-2 text-sm"
+          :value="props.filters.status || ''"
           @change="updateFilter('status', ($event.target as HTMLSelectElement).value)"
         >
           <option value="">All Status</option>

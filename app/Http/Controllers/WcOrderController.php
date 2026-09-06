@@ -23,7 +23,11 @@ class WcOrderController extends Controller
             ->pluck('id');
         
         $orders = WcOrder::query()
-            ->with('website')
+            ->select([
+                'id', 'website_id', 'wp_order_id', 'status', 'currency', 'total',
+                'customer_email', 'customer_name', 'created_at_wp',
+            ])
+            ->with('website:id,name')
             ->whereIn('website_id', $userWebsiteIds) // Only show orders from user's websites
             ->when($request->website_id, fn ($q) =>
                 $q->where('website_id', $request->website_id)
@@ -40,12 +44,18 @@ class WcOrderController extends Controller
                 })
             )
             ->latest('created_at_wp')
+            ->latest('id')
             ->paginate(15)
             ->withQueryString();
 
+        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+            return response()->json(['orders' => $orders])
+                ->header('Cache-Control', 'private, no-store');
+        }
+
         return Inertia::render('Orders/Index', [
             'orders' => $orders,
-            'websites' => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
+            'websites' => fn () => Website::when(!$user->is_admin, fn($q) => $q->where('user_id', $user->id))
                 ->select('id', 'name')
                 ->get(),
             'filters' => $request->only(['website_id', 'status', 'search']),

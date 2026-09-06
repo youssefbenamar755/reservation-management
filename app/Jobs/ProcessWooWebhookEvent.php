@@ -66,8 +66,8 @@ class ProcessWooWebhookEvent implements ShouldQueue
             return $result + ['notifications' => $notifications];
         }, 3);
 
-        // Only the transaction that actually inserted the order announces it.
-        if (! $result || ! $result['created']) {
+        // Refresh the list for new and changed orders; replays and stale deliveries are silent.
+        if (! $result || (! $result['created'] && ! $result['changed'])) {
             return;
         }
 
@@ -75,7 +75,7 @@ class ProcessWooWebhookEvent implements ShouldQueue
         try {
             Event::dispatch(new NewWcOrderReceived($order));
         } catch (Throwable $e) {
-            Log::error('Failed to broadcast new order', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+            Log::error('Failed to broadcast order change', ['order_id' => $order->id, 'error' => $e->getMessage()]);
         }
 
         foreach ($result['notifications'] as [$user, $notification]) {
