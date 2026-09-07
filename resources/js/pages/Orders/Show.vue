@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import FlightCard from '@/components/FlightCard.vue';
 import OrderNotes from '@/components/OrderNotes.vue';
+import OrderEmailComposer from '@/components/OrderEmailComposer.vue';
 import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -507,7 +508,8 @@ const flightData = computed(() => {
                         </Button>
                     </Link>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                    <OrderEmailComposer :key="order.id" :order-id="order.id" :order-number="order.wp_order_id" />
                     <Badge
                         :class="getStatusBadgeClass(order.status)"
                         class="px-3 py-1 text-sm font-medium"

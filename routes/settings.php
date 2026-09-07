@@ -4,10 +4,18 @@ use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\TwoFactorAuthenticationController;
 use App\Http\Controllers\Settings\UpdateController;
+use App\Http\Controllers\Settings\EmailSettingsController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::middleware('auth')->group(function () {
+    Route::get('settings/email', [EmailSettingsController::class, 'index'])->name('email-settings.index');
+    Route::put('settings/email/application', [EmailSettingsController::class, 'application'])->middleware(['admin', 'throttle:6,1'])->name('email-settings.application');
+    Route::post('settings/email/connect', [EmailSettingsController::class, 'connect'])->middleware('throttle:6,1')->name('email-settings.connect');
+    Route::get('settings/email/callback', [EmailSettingsController::class, 'callback'])->name('email-settings.callback');
+    Route::delete('settings/email/connection', [EmailSettingsController::class, 'disconnect'])->name('email-settings.disconnect');
+    Route::post('settings/email/aliases', [EmailSettingsController::class, 'refreshAliases'])->middleware('throttle:6,1')->name('email-settings.aliases');
+    Route::put('settings/email/websites/{website}', [EmailSettingsController::class, 'website'])->middleware('throttle:20,1')->name('email-settings.website');
     Route::redirect('settings', '/settings/profile');
 
     Route::get('settings/profile', [ProfileController::class, 'edit'])->name('profile.edit');

@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\SyncWooCommerceOrders;
+use App\Console\Commands\PruneOrderEmailPreviews;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -24,3 +25,5 @@ Schedule::command(SyncWooCommerceOrders::class)
     ->withoutOverlapping(10) // recover a stale lock within ten minutes after an interrupted run
     ->runInBackground()      // don't block other scheduled tasks
     ->appendOutputTo(storage_path('logs/woo-sync.log'));
+
+Schedule::command(PruneOrderEmailPreviews::class)->daily()->withoutOverlapping(10);

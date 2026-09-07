@@ -48,7 +48,10 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
 
         // Referrer Policy
-        $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
+        $response->headers->set('Referrer-Policy', $request->routeIs('email-settings.callback') ? 'no-referrer' : 'strict-origin-when-cross-origin');
+        if ($request->routeIs('email-settings.callback')) {
+            $response->headers->set('Cache-Control', 'private, no-store');
+        }
 
         // Permissions Policy (formerly Feature Policy)
         $response->headers->set('Permissions-Policy', 

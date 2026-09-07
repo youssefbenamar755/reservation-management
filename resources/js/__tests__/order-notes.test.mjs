@@ -188,6 +188,7 @@ test('status failure redirects restore the confirmed selection without a success
         '@/layouts/AppLayout.vue': { default: wrapper },
         '@/components/FlightCard.vue': { default: wrapper },
         '@/components/OrderNotes.vue': { default: wrapper },
+        '@/components/OrderEmailComposer.vue': { default: wrapper },
         '@/components/ui/card': {
             Card: wrapper,
             CardContent: wrapper,

@@ -32,17 +32,23 @@ const sidebarNavItems: NavItem[] = [
         title: 'Appearance',
         href: editAppearance(),
     },
+    {
+        title: 'Email',
+        href: '/settings/email',
+    },
     // Only show User Management and Updates for admin users
-    ...(user.is_admin ? [
-        {
-            title: 'User Management',
-            href: usersIndex(),
-        },
-        {
-            title: 'Updates',
-            href: '/settings/updates',
-        },
-    ] : []),
+    ...(user.is_admin
+        ? [
+              {
+                  title: 'User Management',
+                  href: usersIndex(),
+              },
+              {
+                  title: 'Updates',
+                  href: '/settings/updates',
+              },
+          ]
+        : []),
 ];
 
 const currentPath = computed(() => page.url || '');
