@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { Copy, CheckCircle2 } from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
-import EntryFieldValue from './EntryFieldValue.vue'
+import { Button } from '@/components/ui/button';
+import { isPhoneField } from '@/lib/whatsapp';
+import { CheckCircle2, Copy } from 'lucide-vue-next';
+import EntryFieldValue from './EntryFieldValue.vue';
 
 defineProps<{
-  field: { key: string; label: string; value: unknown }
-  copiedField: string | null
-}>()
-defineEmits<{ copy: [value: unknown, key: string] }>()
+    field: { key: string; label: string; value: unknown };
+    copiedField: string | null;
+}>();
+defineEmits<{ copy: [value: unknown, key: string] }>();
 </script>
 
 <template>
@@ -37,7 +38,12 @@ defineEmits<{ copy: [value: unknown, key: string] }>()
                     <Copy v-else class="h-3.5 w-3.5" />
                 </Button>
             </dt>
-            <dd class="min-w-0"><EntryFieldValue :value="field.value" /></dd>
+            <dd class="min-w-0">
+                <EntryFieldValue
+                    :value="field.value"
+                    :phone="isPhoneField(field)"
+                />
+            </dd>
         </div>
     </dl>
 </template>

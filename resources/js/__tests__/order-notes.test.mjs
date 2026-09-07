@@ -25,9 +25,10 @@ const flush = async () => {
 
 function loadComponent(filename, mocks, globals = {}) {
     const source = readFileSync(new URL(filename, import.meta.url), 'utf8');
-    const { descriptor } = parse(source, { filename });
-    const compiled = compileScript(descriptor, { id: 'order-notes-test' });
-    const { outputText } = ts.transpileModule(compiled.content, {
+    const content = filename.endsWith('.vue')
+        ? compileScript(parse(source, { filename }).descriptor, { id: 'order-notes-test' }).content
+        : source;
+    const { outputText } = ts.transpileModule(content, {
         compilerOptions: {
             module: ts.ModuleKind.CommonJS,
             target: ts.ScriptTarget.ES2022,
@@ -39,11 +40,18 @@ function loadComponent(filename, mocks, globals = {}) {
         exports: module.exports,
         console,
         AbortController,
+        URL,
         ...globals,
-        require: (name) =>
-            Object.hasOwn(mocks, name) ? mocks[name] : require(name),
+        require: (name) => {
+            if (Object.hasOwn(mocks, name)) return mocks[name];
+            if (name === '@/lib/whatsapp') return loadComponent('../lib/whatsapp.ts', mocks, globals);
+            if (name === '@/components/submissions/EntryFieldValue.vue') {
+                return { default: loadComponent('../components/submissions/EntryFieldValue.vue', mocks, globals) };
+            }
+            return require(name);
+        },
     });
-    return module.exports.default;
+    return filename.endsWith('.vue') ? module.exports.default : module.exports;
 }
 
 function harness(t, available = true) {

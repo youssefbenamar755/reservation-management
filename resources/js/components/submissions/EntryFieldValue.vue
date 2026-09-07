@@ -1,23 +1,41 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { whatsappUrl } from '@/lib/whatsapp';
+import { computed } from 'vue';
 
-const props = defineProps<{ value: unknown }>()
+const props = defineProps<{ value: unknown; phone?: boolean }>();
 
-const isEmpty = computed(() => props.value === null || props.value === undefined || props.value === '' ||
-  (typeof props.value === 'string' && !props.value.trim()) ||
-  (typeof props.value === 'object' && Object.keys(props.value).length === 0))
+const isEmpty = computed(
+    () =>
+        props.value === null ||
+        props.value === undefined ||
+        props.value === '' ||
+        (typeof props.value === 'string' && !props.value.trim()) ||
+        (typeof props.value === 'object' &&
+            Object.keys(props.value).length === 0),
+);
 const link = computed(() => {
-  if (typeof props.value !== 'string') return null
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(props.value)) return { href: `mailto:${props.value}`, external: false }
-  try {
-    const url = new URL(props.value)
-    if (url.protocol === 'https:' || url.protocol === 'http:') return { href: url.href, external: true }
-  } catch { /* Plain text values do not need a link. */ }
-  return null
-})
+    if (props.phone) {
+        const href = whatsappUrl(props.value);
+        return href ? { href, external: true } : null;
+    }
+    if (typeof props.value !== 'string') return null;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(props.value))
+        return { href: `mailto:${props.value}`, external: false };
+    try {
+        const url = new URL(props.value);
+        if (url.protocol === 'https:' || url.protocol === 'http:')
+            return { href: url.href, external: true };
+    } catch {
+        /* Plain text values do not need a link. */
+    }
+    return null;
+});
 
 function label(key: string) {
-  return key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase())
+    return key
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/^./, (letter) => letter.toUpperCase());
 }
 </script>
 
@@ -31,7 +49,7 @@ function label(key: string) {
             :key="index"
             class="min-w-0 border-l-2 border-border pl-3"
         >
-            <EntryFieldValue :value="item" />
+            <EntryFieldValue :value="item" :phone="phone" />
         </li>
     </ul>
     <dl
@@ -42,7 +60,9 @@ function label(key: string) {
             <dt class="mb-0.5 text-xs font-normal text-muted-foreground">
                 {{ label(String(key)) }}
             </dt>
-            <dd class="min-w-0 text-sm"><EntryFieldValue :value="item" /></dd>
+            <dd class="min-w-0 text-sm">
+                <EntryFieldValue :value="item" :phone="phone" />
+            </dd>
         </div>
     </dl>
     <a
@@ -50,6 +70,9 @@ function label(key: string) {
         :href="link.href"
         :target="link.external ? '_blank' : undefined"
         :rel="link.external ? 'noopener noreferrer' : undefined"
+        :title="phone ? 'Open WhatsApp in a new tab' : undefined"
+        :aria-label="phone ? `Open WhatsApp for ${value} (new tab)` : undefined"
+        :class="{ 'text-primary': phone }"
         class="text-sm leading-relaxed font-medium [overflow-wrap:anywhere] underline-offset-4 hover:underline"
         >{{ value }}</a
     >

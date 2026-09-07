@@ -19,9 +19,10 @@ const ui = {
   '@/components/ui/badge': { Badge: wrap('span') },
 }
 function loadComponent(path, mocks, globals, ssr = false) {
-  const { descriptor } = parse(source(path), { filename: path })
-  const compiled = compileScript(descriptor, { id: path, inlineTemplate: ssr, ...(ssr ? { templateOptions: { ssr: true } } : {}) })
-  const { outputText } = ts.transpileModule(compiled.content, {
+  const content = path.endsWith('.vue')
+    ? compileScript(parse(source(path), { filename: path }).descriptor, { id: path, inlineTemplate: ssr, ...(ssr ? { templateOptions: { ssr: true } } : {}) }).content
+    : source(path)
+  const { outputText } = ts.transpileModule(content, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   })
   const module = { exports: {} }
@@ -30,6 +31,7 @@ function loadComponent(path, mocks, globals, ssr = false) {
     require: (name) => {
       if (Object.hasOwn(mocks, name)) return mocks[name]
       if (Object.hasOwn(ui, name)) return ui[name]
+      if (name === '@/lib/whatsapp') return loadComponent('lib/whatsapp.ts', mocks, globals, ssr)
       const componentPath = name === './EntryFieldValue.vue' ? 'components/submissions/EntryFieldValue.vue'
         : name.startsWith('@/') && name.endsWith('.vue') ? name.slice(2) : null
       if (componentPath) return { default: loadComponent(componentPath, mocks, globals, ssr) }
@@ -37,7 +39,7 @@ function loadComponent(path, mocks, globals, ssr = false) {
     },
     ...globals,
   })
-  return module.exports.default
+  return path.endsWith('.vue') ? module.exports.default : module.exports
 }
 function fixture(response = {}, overrides = {}) {
   return { id: 42, entry_id: 9001, website_id: 13, form_id: 4, email: null, created_at_wp: '2026-09-06T10:00:00Z', website: { name: 'Fixture website' }, payload: { response }, ...overrides }
@@ -216,4 +218,20 @@ test('structured values render zero, false, and nested answers and the page rend
   assert.match(html, />No<\/span>/)
   assert.ok(html.includes('Copy all code'))
   assert.ok(html.includes('Raw submission data'))
+})
+
+test('active submission fields link valid phone values through the shared renderer and preserve other values', async (t) => {
+  const originalPhones = ['+1 (202) 555-0100', '0044 7700 900123', '07700900123']
+  const page = harness(t, { phone: originalPhones, cancellation: '1234567890', amount: 1234567, email: 'customer@example.test' })
+  const html = await page.render()
+  assert.equal((html.match(/href="https:\/\/wa.me\//g) || []).length, 2)
+  assert.match(html, /href="https:\/\/wa.me\/12025550100"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/)
+  assert.match(html, /href="https:\/\/wa.me\/447700900123"/)
+  assert.ok(html.includes('+1 (202) 555-0100'))
+  assert.ok(html.includes('07700900123'))
+  assert.ok(html.includes('1234567890'))
+  assert.ok(html.includes('href="mailto:customer@example.test"'))
+  assert.ok(!html.includes('wa.me/1234567890'))
+  page.state.copyToClipboard(originalPhones, 'phone'); await Promise.resolve()
+  assert.equal(page.calls.copies[0], JSON.stringify(originalPhones, null, 2))
 })

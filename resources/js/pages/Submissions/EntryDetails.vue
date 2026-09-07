@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import FlightCard from '@/components/FlightCard.vue'
 import EntryField from '@/components/submissions/EntryField.vue'
 import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue'
+import { isPhoneField } from '@/lib/whatsapp'
 
 const props = defineProps<{ 
   entry: any
@@ -828,13 +829,7 @@ const emailField = computed(() => {
 
 // Identify Phone field
 const phoneField = computed(() => {
-  return formFields.value.find(field => 
-    field.label.toLowerCase().includes('phone') || 
-    field.key.toLowerCase().includes('phone') ||
-    field.key.toLowerCase().includes('telephone') ||
-    field.key.toLowerCase().includes('mobile') ||
-    field.key.toLowerCase().includes('cell')
-  )
+  return formFields.value.find(isPhoneField)
 })
 
 // Identify Flight Departure field
