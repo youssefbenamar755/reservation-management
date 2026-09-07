@@ -54,7 +54,7 @@ test('owners and admins can sync a form schema and its entries', function (bool 
 test('owners and admins can sync all form schemas', function (bool $isAdmin) {
     $user = $isAdmin ? User::factory()->create(['is_admin' => true]) : $this->owner;
 
-    Http::fake(['https://owned.example/wp-json/fluentform/v1/forms' => Http::response([['id' => 4]])]);
+    Http::fake(['https://owned.example/wp-json/fluentform/v1/forms*' => Http::response([['id' => 4]])]);
     $this->mock(FluentFormSchemaService::class, function (MockInterface $mock) {
         $mock->shouldReceive('syncFormSchema')
             ->once()
