@@ -10,6 +10,7 @@ use App\Http\Controllers\WcOrderController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\CustomersController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\WebhookHealthController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -48,6 +49,10 @@ Route::middleware(['auth'])->group(function () {
         ->name('websites.reveal-webhook-secrets');
 });
 Route::middleware(['auth'])->group(function () {
+    Route::get('/website-health', [WebhookHealthController::class, 'index'])->name('website-health.index');
+    Route::get('/website-health/events/{event}', [WebhookHealthController::class, 'show'])->name('website-health.events.show');
+    Route::post('/website-health/events/{event}/retry', [WebhookHealthController::class, 'retry'])
+        ->middleware('throttle:6,1')->name('website-health.events.retry');
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
     Route::get('/customers', [CustomersController::class, 'index'])->name('customers.index');
     Route::get('/customers/export', [CustomersController::class, 'export'])->name('customers.export');
