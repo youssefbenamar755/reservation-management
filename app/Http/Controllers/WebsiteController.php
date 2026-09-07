@@ -322,44 +322,27 @@ class WebsiteController extends Controller
         ]);
     }
 
-    public function syncFluentForm(Request $request, Website $website)
+    public function syncFluentForm(Request $request, Website $website, \App\Services\FluentFormSyncService $service)
     {
-        $this->authorize('view', $website);
-        
+        $this->authorize('update', $website);
         abort_if($website->status !== 'active', 403, 'Website is not active');
-
-        if (empty($website->ff_username) || empty($website->ff_app_password)) {
-            return back()->with('error', 'Fluent Forms authentication credentials are missing. Please save Username and Application Password first.');
-        }
-
-        $request->validate([
-            'form_id' => 'required|integer|min:1',
+        $data = $request->validate([
+            'form_id' => ['required', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
-
-        $formId = (int) $request->input('form_id');
-        $perPage = (int) ($request->input('per_page', 100));
-
         try {
-            // Run synchronously for immediate feedback (better UX)
-            // For production with many websites, consider using queues with a worker
-            $job = new \App\Jobs\SyncFluentSubmissions($website->id, $formId, $perPage);
-            $job->handle();
-            
-            // Count synced submissions for this form
-            $syncedCount = \App\Models\FfSubmission::where('website_id', $website->id)
-                ->where('form_id', $formId)
-                ->count();
-            
-            return back()->with('success', "Fluent Forms sync completed successfully! Synced {$syncedCount} submission(s) for form #{$formId}.");
+            $result = $service->syncNextPage($website, (int) $data['form_id'], (int) ($data['per_page'] ?? 100));
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Fluent Forms sync error', [
-                'website_id' => $website->id,
-                'form_id' => $formId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            
-            return back()->with('error', 'Fluent Forms sync failed: ' . $e->getMessage());
+            $result = ['status' => 'error', 'message' => $e instanceof \App\Exceptions\FluentSyncException ? $e->getMessage() : 'Fluent Forms import failed. Retry to resume the saved page.', 'synced' => 0, 'updated' => 0];
         }
+        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+            return response()->json($result, $result['status'] === 'error' ? 422 : 200)->header('Cache-Control', 'private, no-store');
+        }
+        $message = $result['message'];
+        if ($result['status'] === 'partial') {
+            $message .= ' Run Sync again to continue from the saved page.';
+        }
+
+        return back()->with($result['status'] === 'error' ? 'error' : 'success', $message);
     }
 }

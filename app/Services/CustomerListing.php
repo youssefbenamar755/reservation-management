@@ -25,10 +25,14 @@ class CustomerListing
             ->select('id', 'name')->orderBy('name')->get();
     }
 
-    public function orders(array $authorizedWebsiteIds, array $filters = []): Builder
+    public function orders(array $authorizedWebsiteIds, array $filters = [], ?string $email = null): Builder
     {
         $query = WcOrder::query()->whereIn('website_id', $authorizedWebsiteIds)
             ->whereNotNull('customer_email')->where('customer_email', '!=', '');
+
+        if ($email !== null) {
+            $query->where('customer_email', $email);
+        }
 
         if (! empty($filters['website_ids'])) {
             $query->whereIn('website_id', $filters['website_ids']);
@@ -57,6 +61,17 @@ class CustomerListing
             $query->whereIntegerInRaw('id', $ids);
         }
 
+        if (isset($filters['search']) && $filters['search'] !== '') {
+            // Find customer groups within this scope, then keep all their scoped
+            // orders even when a customer used a different name on another order.
+            $pattern = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['search']).'%';
+            $matches = (clone $query)->select('customer_email')->where(function ($search) use ($pattern) {
+                $search->whereRaw("customer_email LIKE ? ESCAPE '!'", [$pattern])
+                    ->orWhereRaw("customer_name LIKE ? ESCAPE '!'", [$pattern]);
+            });
+            $query->whereIn('customer_email', $matches);
+        }
+
         return $query;
     }
 
@@ -64,6 +79,7 @@ class CustomerListing
     {
         $query = (clone $orders)->select('customer_email')
             ->selectRaw('COUNT(*) as orders_count')
+            ->selectRaw("SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders_count")
             ->selectRaw("SUM(CASE WHEN status = 'completed' THEN total ELSE 0 END) as total_spent")
             ->selectRaw('MIN(created_at_wp) as first_order_at, MAX(created_at_wp) as last_order_at')
             ->groupBy('customer_email');
@@ -112,14 +128,14 @@ class CustomerListing
             $websiteIds = array_keys($detail['websites']);
             sort($websiteIds, SORT_NUMERIC);
             $count = (int) $customer->orders_count;
+            $completedCount = (int) $customer->completed_orders_count;
             $spent = (float) $customer->total_spent;
 
             return [
                 'email' => $customer->customer_email,
                 'orders_count' => $count,
                 'total_spent' => $spent,
-                // Retain the list's existing formula: completed revenue / all matching orders.
-                'average_order_value' => $count > 0 ? $spent / $count : 0,
+                'average_order_value' => $completedCount > 0 ? $spent / $completedCount : 0,
                 'websites' => array_values(array_map(fn ($id) => $websiteNames[$id], $websiteIds)),
                 'country' => $this->mostFrequentCountry($detail['countries']),
                 'first_order_at' => $customer->first_order_at ? Carbon::parse($customer->first_order_at)->format('Y-m-d H:i:s') : null,

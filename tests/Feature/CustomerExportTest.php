@@ -68,7 +68,7 @@ test('listing and export aggregate only orders matching selected websites dates 
             ->has('customers.data', 1)
             ->where('customers.data.0.orders_count', 2)
             ->where('customers.data.0.total_spent', 100)
-            ->where('customers.data.0.average_order_value', 50)
+            ->where('customers.data.0.average_order_value', 100)
             ->where('customers.data.0.websites', ['First site'])
             ->where('customers.data.0.country', 'MA')
             ->where('customers.data.0.first_order_at', '2026-09-06 12:00:00')
@@ -79,7 +79,7 @@ test('listing and export aggregate only orders matching selected websites dates 
     $response = $this->get(route('customers.export', $filters))->assertOk();
     $rows = parseCustomerCsv($response->streamedContent());
     expect($rows)->toHaveCount(2);
-    expect($rows[1])->toBe(['shared@example.com', '2', '100.00', '50.00', 'First site', 'MA', '2026-09-06 12:00:00', '2026-09-07 12:00:00']);
+    expect($rows[1])->toBe(['shared@example.com', '2', '100.00', '100.00', 'First site', 'MA', '2026-09-06 12:00:00', '2026-09-07 12:00:00']);
     expect($response->headers->get('Content-Disposition'))->toContain('customers-first-site-');
 
     foreach (['paid' => ['1', '100.00', '100.00'], 'pending' => ['1', '0.00', '0.00']] as $status => $expected) {

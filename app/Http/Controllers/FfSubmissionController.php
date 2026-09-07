@@ -201,45 +201,31 @@ class FfSubmissionController extends Controller
     /**
      * Sync form schema for a specific form and fetch new entries
      */
-    public function syncFormSchema(Website $website, int $formId, FluentFormSchemaService $schemaService, \App\Services\FluentFormSubmissionService $submissionService)
+    public function syncFormSchema(Request $request, Website $website, int $formId, FluentFormSchemaService $schemaService, \App\Services\FluentFormSyncService $sync)
     {
         $this->authorize('update', $website);
-
-        set_time_limit(120); // Increase timeout to 2 minutes for this request
+        abort_if($website->status !== 'active', 403, 'Website is not active');
         try {
-            // First, sync the form schema
-            $ffForm = $schemaService->syncFormSchema($website, $formId);
-            
-            if (!$ffForm) {
-                return back()->with('error', 'Failed to sync form schema. Please check credentials and form ID.');
+            if (! $sync->progress($website, $formId) && ! $schemaService->syncFormSchema($website, $formId)) {
+                throw new \App\Exceptions\FluentSyncException('Failed to sync form schema. Check credentials and form ID.');
             }
-
-            // HYBRID SYNC: Sync page 1 synchronously for immediate feedback
-            $result = $submissionService->syncPage($website, $formId, 1);
-            $newEntriesCount = $result['count'];
-            $hasMore = $result['has_more'];
-
-            $message = "Form schema synced. Found {$newEntriesCount} new entries.";
-
-            // If there are more pages, dispatch background job starting from page 2
-            if ($hasMore) {
-                \App\Jobs\SyncFluentFormEntries::dispatch($website, $formId, 2);
-                $message .= ' Synchronization continuing in background.';
+            $result = $sync->syncNextPage($website, $formId);
+            if ($result['status'] === 'partial' && ! $request->expectsJson()
+                && config('queue.connections.'.config('queue.default').'.driver') !== 'sync') {
+                \App\Jobs\SyncFluentFormEntries::dispatch($website, $formId, $result['next_page']);
+                $result['message'] .= ' Remaining entries are queued for import.';
+            } elseif ($result['status'] === 'partial') {
+                $result['message'] .= ' Continue from the saved page using Sync.';
             }
-            
-            return back()->with('success', $message);
         } catch (\Throwable $e) {
-            Log::error('Failed to sync form schema', [
-                'website_id' => $website->id,
-                'form_id' => $formId,
-                'error' => $e->getMessage(),
-            ]);
-            
-            return back()->with('error', 'Failed to sync form schema: ' . $e->getMessage());
+            $result = ['status' => 'error', 'message' => $e instanceof \App\Exceptions\FluentSyncException ? $e->getMessage() : 'Fluent Forms import failed. Retry to resume the saved page.', 'synced' => 0, 'updated' => 0];
         }
+        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+            return response()->json($result, $result['status'] === 'error' ? 422 : 200)->header('Cache-Control', 'private, no-store');
+        }
+
+        return back()->with($result['status'] === 'error' ? 'error' : 'success', $result['message']);
     }
-
-
 
     /**
      * Sync form schema for all forms in a website
@@ -247,6 +233,7 @@ class FfSubmissionController extends Controller
     public function syncAllFormSchemas(Website $website, FluentFormSchemaService $service)
     {
         $this->authorize('update', $website);
+        abort_if($website->status !== 'active', 403, 'Website is not active');
 
         set_time_limit(300); // Increase timeout to 5 minutes for bulk sync
         if (empty($website->ff_username) || empty($website->ff_app_password)) {
@@ -267,48 +254,47 @@ class FfSubmissionController extends Controller
                 return back()->with('error', 'Failed to fetch forms list.');
             }
 
-            $formsData = $response->json();
+            $formsData = json_decode($response->body(), false, 512, JSON_THROW_ON_ERROR);
+            for ($depth = 0; $depth < 4 && is_object($formsData); $depth++) {
+                $formsData = $formsData->forms ?? $formsData->data ?? null;
+            }
+            if (!is_array($formsData) || !array_is_list($formsData)) {
+                return back()->with('error', 'Fluent Forms returned an invalid forms list. No schemas were imported.');
+            }
+            $formIds = [];
+            foreach ($formsData as $form) {
+                $formId = filter_var(is_object($form) ? ($form->id ?? null) : $form, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                if ($formId === false) {
+                    return back()->with('error', 'Fluent Forms returned an invalid form ID. No schemas were imported.');
+                }
+                $formIds[$formId] = $formId;
+            }
             $syncedCount = 0;
             $failedCount = 0;
 
-            if (is_array($formsData)) {
-                foreach ($formsData as $form) {
-                    $formId = null;
-                    
-                    if (is_numeric($form)) {
-                        $formId = (int) $form;
-                    } elseif (is_array($form) && isset($form['id'])) {
-                        $formId = (int) $form['id'];
-                    } elseif (is_array($form) && isset($form[0]) && is_array($form[0])) {
-                        foreach ($form as $nestedForm) {
-                            if (isset($nestedForm['id'])) {
-                                $formId = (int) $nestedForm['id'];
-                                break;
-                            }
-                        }
+            foreach ($formIds as $formId) {
+                $result = $service->syncFormSchema($website, $formId);
+                if ($result) {
+                    if (config('queue.connections.'.config('queue.default').'.driver') !== 'sync') {
+                        \App\Jobs\SyncFluentFormEntries::dispatch($website, $formId);
                     }
-                    
-                    if ($formId) {
-                        $result = $service->syncFormSchema($website, $formId);
-                        if ($result) {
-                            // Sync entries in background
-                            \App\Jobs\SyncFluentFormEntries::dispatch($website, $formId); 
-                            $syncedCount++;
-                        } else {
-                            $failedCount++;
-                        }
-                    }
+                    $syncedCount++;
+                } else {
+                    $failedCount++;
                 }
             }
 
-            return back()->with('success', "Synced {$syncedCount} form(s). {$failedCount} failed.");
+            $message = "Synced {$syncedCount} form schema(s). {$failedCount} failed.";
+            $message .= config('queue.connections.'.config('queue.default').'.driver') === 'sync'
+                ? ' Use Sync on Submissions to import or resume entries.'
+                : ' Entry imports for successful schemas are queued.';
+            return back()->with($failedCount > 0 ? 'error' : 'success', $message);
         } catch (\Throwable $e) {
             Log::error('Failed to sync all form schemas', [
                 'website_id' => $website->id,
-                'error' => $e->getMessage(),
             ]);
             
-            return back()->with('error', 'Failed to sync form schemas: ' . $e->getMessage());
+            return back()->with('error', 'Failed to sync form schemas. Retry to resume any saved imports.');
         }
     }
 

@@ -22,8 +22,10 @@ const wrap = (tag) =>
                 vue.h(tag, slots.default?.()),
     });
 
-function loadComponent(router, ssr = false) {
-    const { descriptor } = parse(source, { filename: 'Customers/Index.vue' });
+function loadComponent(router, ssr = false, componentSource = source) {
+    const { descriptor } = parse(componentSource, {
+        filename: 'Customers/Index.vue',
+    });
     const compiled = compileScript(descriptor, {
         id: 'customers',
         inlineTemplate: ssr,
@@ -39,6 +41,16 @@ function loadComponent(router, ssr = false) {
         '@inertiajs/vue3': { router, Head: wrap('header'), Link: wrap('a') },
         '@/layouts/AppLayout.vue': { default: wrap('div') },
         '@/components/ui/badge': { Badge: wrap('span') },
+        '@/components/ui/card': Object.fromEntries(
+            [
+                'Card',
+                'CardContent',
+                'CardDescription',
+                'CardHeader',
+                'CardTitle',
+            ].map((name) => [name, wrap('div')]),
+        ),
+        '@/components/charts/RevenueChart.vue': { default: wrap('div') },
         '@/components/ui/button': {
             Button: vue.defineComponent({
                 props: ['asChild'],
@@ -370,7 +382,10 @@ test('customer page SSR retains all row data, accessible filters, and native CSV
     assert.match(html, /56 matching customers/);
     assert.match(html, /Includes all matching customers, across every page/);
     assert.match(html, /href="\/customers\/export\?website_ids%5B%5D=3/);
-    assert.match(html, /href="\/customers\/customer%2Btest%40example.test"/);
+    assert.match(
+        html,
+        /href="\/customers\/customer%2Btest%40example.test\?website_ids%5B%5D=3/,
+    );
     for (const text of [
         'customer+test@example.test',
         '$120.00',
@@ -383,6 +398,7 @@ test('customer page SSR retains all row data, accessible filters, and native CSV
         assert.ok(html.includes(text), text);
     for (const id of [
         'customer-start-date',
+        'customer-search',
         'customer-end-date',
         'customer-websites',
         'customer-country',
@@ -395,4 +411,103 @@ test('customer page SSR retains all row data, accessible filters, and native CSV
     assert.match(html, /Apply filters/);
     assert.match(html, /Reset filters/);
     assert.match(html, /aria-sort="descending"/);
+});
+
+test('name or email search applies once and carries through export, sort, and customer details', async (t) => {
+    const { state, props, calls } = harness(
+        t,
+        { website_ids: [3], country: 'MA' },
+        { current_page: 3, per_page: 25 },
+    );
+    state.search.value = 'Morgan';
+    await vue.nextTick();
+    assert.equal(calls.gets.length, 0);
+    assert.equal(state.hasUnappliedFilters.value, true);
+    assert.equal(
+        new URL(state.exportUrl.value, 'https://example.test').searchParams.has(
+            'search',
+        ),
+        false,
+    );
+    state.applyFilters();
+    assert.equal(calls.gets.length, 1);
+    assert.equal(calls.gets[0].params.search, 'Morgan');
+    assert.equal(Object.hasOwn(calls.gets[0].params, 'page'), false);
+    props.filters = plain(calls.gets[0].params);
+    await vue.nextTick();
+    calls.gets[0].options.onFinish();
+    assert.equal(state.hasUnappliedFilters.value, false);
+    const exportQuery = new URL(state.exportUrl.value, 'https://example.test')
+        .searchParams;
+    assert.equal(exportQuery.get('search'), 'Morgan');
+    assert.equal(exportQuery.has('page'), false);
+    const detail = new URL(
+        state.customerUrl('customer+tag@example.test'),
+        'https://example.test',
+    );
+    assert.equal(detail.pathname, '/customers/customer%2Btag%40example.test');
+    assert.equal(detail.searchParams.get('search'), 'Morgan');
+    assert.deepEqual(detail.searchParams.getAll('website_ids[]'), ['3']);
+    assert.equal(detail.searchParams.get('country'), 'MA');
+    assert.equal(detail.searchParams.get('page'), '3');
+    assert.equal(detail.searchParams.get('per_page'), '25');
+    state.toggleSort('total_spent');
+    assert.equal(calls.gets.length, 2);
+    assert.equal(calls.gets[1].params.search, 'Morgan');
+    calls.gets[1].options.onFinish();
+    props.filters = { search: 'email@example.test' };
+    await vue.nextTick();
+    assert.equal(state.search.value, 'email@example.test');
+    state.resetFilters();
+    assert.equal(state.search.value, '');
+    assert.equal(Object.hasOwn(calls.gets[2].params, 'search'), false);
+});
+
+test('customer detail Back and breadcrumbs preserve the applied search and scope', async () => {
+    const detailSource = readFileSync(
+        new URL('../pages/Customers/Show.vue', import.meta.url),
+        'utf8',
+    );
+    const props = {
+        customer: {
+            email: 'customer+test@example.test',
+            name: 'Morgan',
+            total_orders: 3,
+            total_spent: 160,
+            average_order_value: 80,
+            websites: [{ id: 3, name: 'Reservation Visa' }],
+            country: 'MA',
+            first_order_at: null,
+            last_order_at: null,
+        },
+        orders: [],
+        revenueOverTime: [],
+        websiteBreakdown: [],
+        countryHistory: [],
+        returnUrl:
+            '/customers?website_ids%5B0%5D=3&search=Morgan&page=3&sort_by=total_spent',
+        filters: {
+            website_ids: [3],
+            start_date: '2026-09-01',
+            country: 'MA',
+            payment_status: 'paid',
+        },
+    };
+    const state = loadComponent({}, false, detailSource).setup(props, {
+        expose() {},
+    });
+    assert.equal(state.breadcrumbs.value[0].href, props.returnUrl);
+    const html = await renderToString(
+        vue.createSSRApp(loadComponent({}, true, detailSource), props),
+    );
+    assert.match(
+        html,
+        /href="\/customers\?website_ids%5B0%5D=3&amp;search=Morgan&amp;page=3&amp;sort_by=total_spent"/,
+    );
+    assert.match(
+        html,
+        /Reservation Visa · From 2026-09-01 · Country: MA · Paid orders/,
+    );
+    assert.match(html, /Completed revenue per completed order/);
+    assert.match(html, /Orders for this customer within the selected filters/);
 });

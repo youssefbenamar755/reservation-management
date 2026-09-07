@@ -31,13 +31,84 @@ const breadcrumbs: BreadcrumbItem[] = [
   },
 ]
 
-function updateFilter(key: string, value: string) {
-  router.get(
-    '/orders',
-    { ...props.filters, [key]: value },
-    { preserveState: true, replace: true }
-  )
+const filterInputs = ref(readAppliedFilters())
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let filterRequest: { params: string; cancel?: () => void } | null = null
+let dispatchingFilters = false
+let filtersDisposed = false
+
+function readAppliedFilters() {
+  return {
+    website_id: String(props.filters.website_id || ''),
+    status: props.filters.status || '',
+    search: props.filters.search || '',
+  }
 }
+
+function clearSearchTimer() {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+  searchTimer = null
+}
+
+function cancelFilterRequest() {
+  const previous = filterRequest
+  filterRequest = null
+  previous?.cancel?.()
+}
+
+function cancelPendingFilters(restore = false) {
+  clearSearchTimer()
+  cancelFilterRequest()
+  if (restore) filterInputs.value = readAppliedFilters()
+}
+
+function submitFilters() {
+  clearSearchTimer()
+  const params = JSON.stringify(filterInputs.value)
+  if (filterRequest?.params === params) return
+  cancelFilterRequest()
+  if (filtersDisposed || params === JSON.stringify(readAppliedFilters())) return
+  const request: { params: string; cancel?: () => void } = { params }
+  filterRequest = request
+  dispatchingFilters = true
+  try {
+    router.get('/orders', { ...filterInputs.value }, {
+      preserveState: true,
+      preserveScroll: true,
+      replace: true,
+      onCancelToken: (token) => {
+        if (filterRequest !== request) token.cancel()
+        else request.cancel = () => token.cancel()
+      },
+      onSuccess: () => {
+        if (filterRequest === request) filterInputs.value = readAppliedFilters()
+      },
+      onFinish: () => {
+        if (filterRequest === request) filterRequest = null
+      },
+    })
+  } finally {
+    dispatchingFilters = false
+  }
+}
+
+function updateSearch(value: string) {
+  clearSearchTimer()
+  cancelFilterRequest()
+  filterInputs.value.search = value
+  if (JSON.stringify(filterInputs.value) === JSON.stringify(readAppliedFilters())) return
+  searchTimer = setTimeout(submitFilters, 300)
+}
+
+function updateFilter(key: 'website_id' | 'status', value: string) {
+  filterInputs.value[key] = value
+  submitFilters()
+}
+
+// Live snapshots keep the draft; returned filters and history restore the inputs.
+watch(() => props.filters, () => {
+  if (!filterRequest && searchTimer === null) filterInputs.value = readAppliedFilters()
+}, { deep: true })
 
 const isSyncing = ref(false)
 let syncAbortController: AbortController | null = null
@@ -117,6 +188,7 @@ function updateAvailability() {
 }
 
 function suspendForHistoryNavigation() {
+  cancelPendingFilters(true)
   liveRefresh.suspend()
 }
 
@@ -137,6 +209,7 @@ onMounted(() => {
   cleanupListeners.push(
     router.on('before', ({ detail: { visit } }) => {
       if (visit.async) return
+      if (!dispatchingFilters) cancelPendingFilters(true)
       liveRefresh.suspend()
       // A navigation cancelled by another listener has no start/finish event.
       queueMicrotask(() => {
@@ -179,6 +252,8 @@ onMounted(() => {
 })
 onUnmounted(() => {
   mounted = false
+  filtersDisposed = true
+  cancelPendingFilters()
   liveRefresh.stop()
   syncAbortController?.abort()
   offNotification('orders-index')
@@ -265,6 +340,7 @@ async function syncOrdersFromWooCommerce() {
 
 function goToPage(url: string | null) {
   if (!url) return
+  cancelPendingFilters(true)
   
   // Parse URL to extract path and query parameters
   // Handle both relative (/orders?page=2) and absolute URLs (http://domain.com/orders?page=2)
@@ -372,7 +448,8 @@ function formatDate(dateString: string | null) {
       >
         <select
           class="rounded-md border bg-background px-3 py-2 text-sm"
-          :value="props.filters.website_id || ''"
+          aria-label="Website"
+          :value="filterInputs.website_id"
           @change="updateFilter('website_id', ($event.target as HTMLSelectElement).value)"
         >
           <option value="">All Websites</option>
@@ -383,7 +460,8 @@ function formatDate(dateString: string | null) {
 
         <select
           class="rounded-md border bg-background px-3 py-2 text-sm"
-          :value="props.filters.status || ''"
+          aria-label="Order status"
+          :value="filterInputs.status"
           @change="updateFilter('status', ($event.target as HTMLSelectElement).value)"
         >
           <option value="">All Status</option>
@@ -394,11 +472,13 @@ function formatDate(dateString: string | null) {
         </select>
 
         <input
-          type="text"
+          type="search"
           class="rounded-md border bg-background px-3 py-2 text-sm"
+          aria-label="Search orders"
           placeholder="Search by Order ID, Customer Name, or Email"
-          :value="props.filters.search"
-          @input="updateFilter('search', ($event.target as HTMLInputElement).value)"
+          :value="filterInputs.search"
+          @input="updateSearch(($event.target as HTMLInputElement).value)"
+          @keydown.enter.prevent="submitFilters"
         />
 
         <Button
