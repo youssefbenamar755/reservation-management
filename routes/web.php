@@ -11,6 +11,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\CustomersController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\WebhookHealthController;
+use App\Http\Controllers\OrderEmailController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -59,6 +60,10 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/customers/{email}', [CustomersController::class, 'show'])->name('customers.show');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
+    Route::get('/orders/{order}/email', [OrderEmailController::class, 'options'])->name('orders.email.options');
+    Route::post('/orders/{order}/email/preview', [OrderEmailController::class, 'preview'])->middleware('throttle:10,1')->name('orders.email.preview');
+    Route::get('/orders/{order}/email/{delivery}', [OrderEmailController::class, 'show'])->name('orders.email.show');
+    Route::post('/orders/{order}/email/{delivery}/send', [OrderEmailController::class, 'send'])->middleware('throttle:6,1')->name('orders.email.send');
     Route::get('/orders/{order}/notes', [WcOrderController::class, 'notes'])->name('orders.notes');
     Route::put('/orders/{order}', [WcOrderController::class, 'update'])->name('orders.update');
     Route::post('/orders/{order}/generate-amadeus-code', [WcOrderController::class, 'generateAmadeusCode'])->name('orders.generate-amadeus-code');
