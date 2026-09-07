@@ -46,6 +46,7 @@ interface Props {
     websites: Array<{ id: number; name: string }>;
     countries: string[];
     filters: {
+        search?: string | null;
         start_date?: string | null;
         end_date?: string | null;
         website_ids?: number[] | string;
@@ -70,6 +71,7 @@ type FilterParams = Record<string, string | number[]>;
 
 function normalizeFilters(filters: Props['filters']): FilterParams {
     const params: FilterParams = {};
+    if (filters.search?.trim()) params.search = filters.search.trim();
     if (filters.start_date) params.start_date = filters.start_date;
     if (filters.end_date) params.end_date = filters.end_date;
     const ids = Array.isArray(filters.website_ids)
@@ -98,6 +100,7 @@ function normalizeFilters(filters: Props['filters']): FilterParams {
 
 // Drafts change locally. Applied props are the source of truth for the table and export.
 const startDate = ref('');
+const search = ref('');
 const endDate = ref('');
 const selectedWebsiteIds = ref<number[]>([]);
 const selectedCountry = ref('');
@@ -111,6 +114,7 @@ const sortDir = computed(() => String(appliedFilters.value.sort_dir));
 
 function setDraftFilters(filters: Props['filters']) {
     const normalized = normalizeFilters(filters);
+    search.value = filters.search || '';
     startDate.value = filters.start_date || '';
     endDate.value = filters.end_date || '';
     selectedWebsiteIds.value = Array.isArray(normalized.website_ids)
@@ -132,6 +136,7 @@ watch(
 
 const draftFilters = computed(() =>
     normalizeFilters({
+        search: search.value,
         start_date: startDate.value,
         end_date: endDate.value,
         website_ids: selectedWebsiteIds.value,
@@ -153,15 +158,31 @@ const resultsActionsDisabled = computed(
 const totalCustomers = computed(
     () => props.customers?.total ?? props.customers?.meta?.total ?? 0,
 );
-const exportUrl = computed(() => {
+function queryString(params: FilterParams) {
     const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(appliedFilters.value)) {
+    for (const [key, value] of Object.entries(params)) {
         if (Array.isArray(value))
             value.forEach((id) => query.append(`${key}[]`, String(id)));
         else query.set(key, value);
     }
-    return `/customers/export?${query.toString()}`;
-});
+    return query.toString();
+}
+const exportUrl = computed(
+    () => `/customers/export?${queryString(appliedFilters.value)}`,
+);
+function customerUrl(email: string) {
+    return `/customers/${encodeURIComponent(email)}?${queryString({
+        ...appliedFilters.value,
+        page: String(
+            props.customers?.current_page ??
+                props.customers?.meta?.current_page ??
+                1,
+        ),
+        per_page: String(
+            props.customers?.per_page ?? props.customers?.meta?.per_page ?? 15,
+        ),
+    })}`;
+}
 const websiteScope = computed(() => {
     const ids = appliedFilters.value.website_ids;
     return Array.isArray(ids) && ids.length
@@ -185,6 +206,7 @@ const appliedFilterSummary = computed(() => {
                 ? `Until ${filters.end_date}`
                 : 'All dates';
     return [
+        ...(filters.search ? [`Search: ${filters.search}`] : []),
         dates,
         filters.country ? `Country: ${filters.country}` : 'All countries',
         filters.payment_status === 'paid'
@@ -312,8 +334,6 @@ function decodeHtmlEntities(text: string): string {
             String.fromCharCode(parseInt(n, 16)),
         );
 }
-
-const customerEmail = (email: string) => encodeURIComponent(email);
 </script>
 
 <template>
@@ -373,6 +393,21 @@ const customerEmail = (email: string) => encodeURIComponent(email);
                     class="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6"
                 >
                     <legend class="sr-only">Customer filters</legend>
+                    <div class="min-w-0 sm:col-span-2 xl:col-span-6">
+                        <label
+                            for="customer-search"
+                            class="mb-1 block text-xs font-medium text-muted-foreground"
+                            >Search customers</label
+                        >
+                        <input
+                            id="customer-search"
+                            v-model="search"
+                            type="search"
+                            maxlength="200"
+                            placeholder="Name or email"
+                            class="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-sm"
+                        />
+                    </div>
                     <div class="min-w-0 sm:col-span-2">
                         <div
                             class="grid min-w-0 grid-cols-1 gap-2 min-[420px]:grid-cols-2"
@@ -625,6 +660,10 @@ const customerEmail = (email: string) => encodeURIComponent(email);
                                     class="px-6 py-4 text-left font-semibold text-foreground"
                                 >
                                     AOV
+                                    <span
+                                        class="mt-1 block text-xs font-normal text-muted-foreground"
+                                        >Completed orders</span
+                                    >
                                 </th>
                                 <th
                                     class="px-6 py-4 text-left font-semibold text-foreground"
@@ -637,12 +676,12 @@ const customerEmail = (email: string) => encodeURIComponent(email);
                                     Country
                                 </th>
                                 <th
-                                    class="px-6 py-4 text-left font-semibold text-foreground"
+                                    class="px-6 py-4 text-left font-semibold whitespace-nowrap text-foreground"
                                 >
                                     First Order
                                 </th>
                                 <th
-                                    class="px-6 py-4 text-left font-semibold text-foreground"
+                                    class="px-6 py-4 text-left font-semibold whitespace-nowrap text-foreground"
                                     :aria-sort="
                                         sortBy === 'last_order_at'
                                             ? sortDir === 'asc'
@@ -672,14 +711,12 @@ const customerEmail = (email: string) => encodeURIComponent(email);
                                 :key="customer.email"
                                 class="cursor-pointer border-b transition-colors hover:bg-muted/50"
                                 @click="
-                                    router.visit(
-                                        `/customers/${customerEmail(customer.email)}`,
-                                    )
+                                    router.visit(customerUrl(customer.email))
                                 "
                             >
                                 <td class="px-6 py-4">
                                     <Link
-                                        :href="`/customers/${customerEmail(customer.email)}`"
+                                        :href="customerUrl(customer.email)"
                                         class="font-medium text-primary hover:underline"
                                         @click.stop
                                     >
@@ -713,10 +750,10 @@ const customerEmail = (email: string) => encodeURIComponent(email);
                                 <td class="px-6 py-4">
                                     {{ customer.country || '—' }}
                                 </td>
-                                <td class="px-6 py-4">
+                                <td class="px-6 py-4 whitespace-nowrap">
                                     {{ formatDate(customer.first_order_at) }}
                                 </td>
-                                <td class="px-6 py-4">
+                                <td class="px-6 py-4 whitespace-nowrap">
                                     {{ formatDate(customer.last_order_at) }}
                                 </td>
                             </tr>

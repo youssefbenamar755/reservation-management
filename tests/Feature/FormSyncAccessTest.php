@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Queue;
 use Mockery\MockInterface;
 
 beforeEach(function () {
+    config(['queue.default' => 'database']);
     Http::preventStrayRequests();
     Queue::fake();
     $this->owner = User::factory()->create();

@@ -4,7 +4,7 @@ import { type BreadcrumbItem } from '@/types'
 import { Head, router, usePage } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { DownloadCloud, ChevronLeft, ChevronRight, Trash2 } from 'lucide-vue-next'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
 import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import {
@@ -19,6 +19,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/composables/useToast'
 import axios from 'axios'
+import { requestFluentFormsPage, runFluentFormsSync } from '@/lib/fluentFormsSync'
 
 const props = defineProps<{
   forms: any
@@ -37,11 +38,23 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 const toast = useToast()
 const isModalOpen = ref(false)
-const selectedWebsiteId = ref<string>('')
-const selectedFormId = ref<string>('')
+const selectedWebsiteId = ref<string | number>('')
+const selectedFormId = ref<string | number>('')
 const availableForms = ref<Array<{ id: number; title: string }>>([])
 const isLoadingForms = ref(false)
 const isSyncing = ref(false)
+const loadedFormsWebsiteId = ref('')
+const syncProgress = ref('')
+const syncError = ref('')
+let formsRequestId = 0
+let formsController: AbortController | null = null
+let syncController: AbortController | null = null
+let disposed = false
+let removeNavigationListener: (() => void) | null = null
+const canSync = computed(() => !isSyncing.value && !isLoadingForms.value &&
+  !!selectedWebsiteId.value && loadedFormsWebsiteId.value === String(selectedWebsiteId.value) &&
+  Number.isSafeInteger(Number(selectedFormId.value)) && Number(selectedFormId.value) > 0 &&
+  availableForms.value.some((form) => String(form.id) === String(selectedFormId.value)))
 const deletingFormId = ref<string | null>(null)
 const page = usePage()
 
@@ -54,67 +67,126 @@ const onSubmissionNotification = (data: any) => {
   }
 }
 onMounted(() => {
+  removeNavigationListener = router.on('before', ({ detail: { visit } }) => {
+    if (!visit.async && visit.url.pathname !== '/submissions') {
+      syncController?.abort()
+      invalidateFormsLoad()
+    }
+  })
   const user = (page.props as any).auth?.user
   if (!user) return
   onNotification('submissions-index', onSubmissionNotification, user.id)
 })
 onUnmounted(() => {
+  disposed = true
+  invalidateFormsLoad()
+  syncController?.abort()
+  removeNavigationListener?.()
   offNotification('submissions-index')
 })
 
-// Watch for website selection to load forms
-async function loadFormsForWebsite(websiteId: string) {
-  if (!websiteId) {
-    availableForms.value = []
-    selectedFormId.value = ''
-    return
-  }
+function invalidateFormsLoad() {
+  formsRequestId++
+  formsController?.abort()
+  formsController = null
+  availableForms.value = []
+  selectedFormId.value = ''
+  loadedFormsWebsiteId.value = ''
+  isLoadingForms.value = false
+}
 
+watch(selectedWebsiteId, (websiteId) => { void loadFormsForWebsite(String(websiteId)) }, { flush: 'sync' })
+watch(isModalOpen, (open) => {
+  if (!open) {
+    syncController?.abort()
+    invalidateFormsLoad()
+    selectedWebsiteId.value = ''
+  }
+}, { flush: 'sync' })
+
+async function loadFormsForWebsite(websiteId: string) {
+  invalidateFormsLoad()
+  syncProgress.value = ''
+  syncError.value = ''
+  if (!websiteId || !isModalOpen.value || disposed) return
+
+  const requestId = formsRequestId
+  const controller = new AbortController()
+  formsController = controller
+  const isCurrent = () => !disposed && requestId === formsRequestId && !controller.signal.aborted &&
+    isModalOpen.value && String(selectedWebsiteId.value) === websiteId
   isLoadingForms.value = true
   try {
-    const response = await axios.get(`/websites/${websiteId}/forms`)
-    availableForms.value = response.data.forms || []
+    const response = await axios.get(`/websites/${websiteId}/forms`, { signal: controller.signal, timeout: 25_000 })
+    if (!isCurrent()) return
+    availableForms.value = Array.isArray(response.data.forms) ? response.data.forms : []
+    loadedFormsWebsiteId.value = websiteId
   } catch (error: any) {
-    toast.error(error.response?.data?.error || 'Failed to load forms')
-    availableForms.value = []
+    if (!isCurrent()) return
+    syncError.value = error.response?.data?.error || 'Failed to load forms. Select the website again to retry.'
+    toast.error(syncError.value)
   } finally {
-    isLoadingForms.value = false
+    if (isCurrent()) {
+      isLoadingForms.value = false
+      formsController = null
+    }
   }
 }
 
 function openModal() {
+  invalidateFormsLoad()
   selectedWebsiteId.value = ''
-  selectedFormId.value = ''
-  availableForms.value = []
+  syncProgress.value = ''
+  syncError.value = ''
   isModalOpen.value = true
 }
 
-function handleSync() {
-  if (!selectedWebsiteId.value || !selectedFormId.value) {
-    toast.error('Please select both website and form')
+async function handleSync() {
+  if (isSyncing.value || isLoadingForms.value) return
+  if (!canSync.value) {
+    toast.error('Please select a form from the selected website.')
     return
   }
 
+  const websiteId = selectedWebsiteId.value
+  const formId = Number(selectedFormId.value)
+  const controller = new AbortController()
+  syncController = controller
   isSyncing.value = true
-
-  router.post(
-    `/websites/${selectedWebsiteId.value}/sync-fluent-form`,
-    { form_id: parseInt(selectedFormId.value) },
-    {
-      preserveScroll: true,
-      preserveState: true,
-      onSuccess: () => {
-        isModalOpen.value = false
-        isSyncing.value = false
-        selectedWebsiteId.value = ''
-        selectedFormId.value = ''
-        availableForms.value = []
+  syncError.value = ''
+  syncProgress.value = 'Syncing submissions… Completed pages are saved so you can stop and resume.'
+  try {
+    const result = await runFluentFormsSync(
+      () => requestFluentFormsPage(`/websites/${websiteId}/sync-fluent-form`, { form_id: formId }, controller.signal),
+      (progress) => {
+        syncProgress.value = `${progress.pages} page(s) saved · ${progress.synced} new, ${progress.updated} updated. You can stop and resume.`
       },
-      onError: () => {
-        isSyncing.value = false
-      },
+      { signal: controller.signal },
+    )
+    if (disposed || !isModalOpen.value || controller.signal.aborted) return
+    syncController = null
+    isSyncing.value = false
+    isModalOpen.value = false
+    toast.success(`Sync complete — ${result.synced} new submission(s), ${result.updated} updated.`)
+    router.reload({ only: ['forms'] })
+  } catch (error: any) {
+    if (disposed || !isModalOpen.value) return
+    if (controller.signal.aborted) {
+      syncProgress.value = 'Sync stopped. Completed pages are saved; choose Sync to resume.'
+    } else {
+      syncError.value = error?.message || 'Sync failed. Completed pages are saved; try again to resume.'
+      toast.error(syncError.value)
     }
-  )
+  } finally {
+    if (syncController === controller) {
+      isSyncing.value = false
+      syncController = null
+    }
+  }
+}
+
+function stopSync() {
+  syncController?.abort()
 }
 
 function updateFilter(key: string, value: string) {
@@ -143,11 +215,11 @@ function formatDate(dateString: string | null) {
   }).format(date)
 }
 
-function deleteForm(websiteId: number, formId: number, event: Event) {
+function deleteForm(form: { website_id: number; form_id: number; entry_count: number; form_name?: string; website: { name: string } }, event: Event) {
   event.stopPropagation()
-  
+  const { website_id: websiteId, form_id: formId } = form
   const formKey = `${websiteId}-${formId}`
-  if (!confirm(`Are you sure you want to delete all ${formId} submissions for this form? This action cannot be undone.`)) {
+  if (!confirm(`Delete all ${form.entry_count} submissions from ${form.form_name || `Form #${formId}`} on ${form.website.name}? This action cannot be undone.`)) {
     return
   }
 
@@ -196,9 +268,8 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
                 <select
                   id="sync-website"
                   v-model="selectedWebsiteId"
-                  @change="loadFormsForWebsite(selectedWebsiteId)"
                   class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  :disabled="isLoadingForms || isSyncing"
+                  :disabled="isSyncing"
                 >
                   <option value="">Select a website</option>
                   <option
@@ -235,16 +306,17 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
                   Loading forms...
                 </p>
               </div>
+              <p v-if="syncProgress" class="text-sm text-muted-foreground" role="status">{{ syncProgress }}</p>
+              <p v-if="syncError" class="text-sm text-destructive" role="alert">{{ syncError }}</p>
             </div>
             <DialogFooter>
               <Button
                 variant="outline"
-                @click="isModalOpen = false"
-                :disabled="isSyncing"
+                @click="isSyncing ? stopSync() : isModalOpen = false"
               >
-                Cancel
+                {{ isSyncing ? 'Stop sync' : 'Cancel' }}
               </Button>
-              <Button @click="handleSync" :disabled="!selectedWebsiteId || !selectedFormId || isSyncing">
+              <Button @click="handleSync" :disabled="!canSync">
                 <DownloadCloud
                   v-if="isSyncing"
                   class="mr-2 h-4 w-4 animate-spin"
@@ -350,7 +422,7 @@ function deleteForm(websiteId: number, formId: number, event: Event) {
                     variant="destructive"
                     size="sm"
                     :disabled="deletingFormId === `${form.website_id}-${form.form_id}`"
-                    @click.stop="deleteForm(form.website_id, form.form_id, $event)"
+                    @click.stop="deleteForm(form, $event)"
                   >
                     <Trash2 v-if="deletingFormId !== `${form.website_id}-${form.form_id}`" class="h-4 w-4" />
                     <span v-else class="h-4 w-4 animate-spin">⏳</span>

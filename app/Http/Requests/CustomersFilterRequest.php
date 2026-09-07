@@ -14,6 +14,9 @@ class CustomersFilterRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        if (is_string($this->input('search'))) {
+            $this->merge(['search' => trim($this->input('search'))]);
+        }
         if (is_string($this->input('website_ids'))) {
             $this->merge(['website_ids' => array_values(array_filter(array_map('trim', explode(',', $this->input('website_ids'))), fn ($id) => $id !== ''))]);
         }
@@ -25,6 +28,7 @@ class CustomersFilterRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:200'],
             'website_ids' => ['nullable', 'array', 'max:1000'],
             'website_ids.*' => ['integer', 'min:1'],
             'start_date' => ['nullable', 'date_format:Y-m-d'],
@@ -48,6 +52,7 @@ class CustomersFilterRequest extends FormRequest
         sort($websiteIds, SORT_NUMERIC);
 
         return [
+            'search' => $values['search'] ?? null,
             'start_date' => $values['start_date'] ?? null,
             'end_date' => $values['end_date'] ?? null,
             'website_ids' => $websiteIds,

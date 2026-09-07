@@ -41,6 +41,7 @@ test('customer enrichment retains the database group for case accent and padding
             'website_id' => $websites[$websiteIndex]->id,
             'wp_order_id' => $index + 1,
             'customer_email' => $email,
+            'customer_name' => $index === 1 ? 'Search Needle' : 'Earlier name',
             'status' => 'completed',
             'currency' => 'USD',
             'total' => $total,
@@ -52,7 +53,7 @@ test('customer enrichment retains the database group for case accent and padding
     $listing = app(CustomerListing::class);
     $authorizedWebsites = $listing->websites($owner);
     $source = DB::table('wc_orders')
-        ->select('id', 'website_id', 'status', 'total', 'created_at_wp', 'payload')
+        ->select('id', 'website_id', 'status', 'total', 'created_at_wp', 'payload', 'customer_name')
         ->selectRaw('customer_email COLLATE customer_email_test AS customer_email');
     $orders = $listing->orders($authorizedWebsites->pluck('id')->all())->fromSub($source, 'wc_orders');
     $customers = $listing->customers($orders, [
@@ -80,6 +81,13 @@ test('customer enrichment retains the database group for case accent and padding
         ->and($enriched[1]['total_spent'])->toBe(90.0)
         ->and($enriched[1]['websites'])->toBe(['First website'])
         ->and($enriched[1]['country'])->toBe('GB');
+
+    $searchedOrders = $listing->orders($authorizedWebsites->pluck('id')->all(), ['search' => 'Needle'])->fromSub($source, 'wc_orders');
+    $searched = $listing->customers($searchedOrders, ['min_spend' => null, 'sort_by' => 'orders_count', 'sort_dir' => 'desc'])->get();
+    expect($searched)->toHaveCount(1)->and((int) $searched[0]->orders_count)->toBe(3);
+    $searchedDetails = $listing->enrich($searched, $searchedOrders, $authorizedWebsites)->first();
+    expect($searchedDetails['websites'])->toBe(['First website', 'Second website', 'Third website'])
+        ->and($searchedDetails['total_spent'])->toBe(60.0);
 
     Http::assertNothingSent();
 });

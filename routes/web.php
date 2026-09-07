@@ -39,7 +39,7 @@ Route::middleware(['auth'])->group(function () {
         ->middleware('throttle:sync-pages')
         ->name('websites.sync-woocommerce-orders');
     Route::post('websites/{website}/sync-fluent-form', [WebsiteController::class, 'syncFluentForm'])
-        ->middleware('throttle:sync')
+        ->middleware('throttle:sync-pages')
         ->name('websites.sync-fluent-form');
     
     // Reveal webhook secrets (requires password confirmation)
@@ -54,6 +54,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/customers/{email}', [CustomersController::class, 'show'])->name('customers.show');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
+    Route::get('/orders/{order}/notes', [WcOrderController::class, 'notes'])->name('orders.notes');
     Route::put('/orders/{order}', [WcOrderController::class, 'update'])->name('orders.update');
     Route::post('/orders/{order}/generate-amadeus-code', [WcOrderController::class, 'generateAmadeusCode'])->name('orders.generate-amadeus-code');
     
@@ -71,7 +72,7 @@ Route::middleware(['auth'])->group(function () {
     
     // Form schema sync routes with rate limiting
     Route::post('/submissions/forms/{website}/{form_id}/sync-schema', [FfSubmissionController::class, 'syncFormSchema'])
-        ->middleware('throttle:sync')
+        ->middleware('throttle:sync-pages')
         ->name('submissions.sync-form-schema');
     Route::post('/submissions/forms/{website}/sync-all-schemas', [FfSubmissionController::class, 'syncAllFormSchemas'])
         ->middleware('throttle:sync')

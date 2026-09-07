@@ -2,185 +2,168 @@
 
 namespace App\Services;
 
+use App\Exceptions\FluentSyncException;
 use App\Models\FfSubmission;
 use App\Models\Website;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class FluentFormSubmissionService
 {
-    /**
-     * Sync entries for a specific page.
-     * Returns an array with 'count' (synced count) and 'has_more' (boolean).
-     */
+    /** Fetch one page. Errors are never represented as an exhausted history. */
     public function syncPage(Website $website, int $formId, int $page = 1, int $perPage = 100): array
     {
-        if (empty($website->ff_username) || empty($website->ff_app_password)) {
-            Log::warning('Fluent Forms credentials not configured for syncing entries', [
-                'website_id' => $website->id,
-                'form_id' => $formId,
-            ]);
-            return ['count' => 0, 'has_more' => false, 'entries_in_batch' => 0];
+        if (! $website->ff_username || ! $website->ff_app_password) {
+            throw new FluentSyncException('Fluent Forms credentials are missing.');
+        }
+        if ($website->status !== 'active') {
+            throw new FluentSyncException('Website is not active.');
+        }
+        if ($formId < 1 || $page < 1 || $page > 10000 || $perPage < 1 || $perPage > 100) {
+            throw new FluentSyncException('Invalid Fluent Forms pagination parameters.');
         }
 
-        $baseUrl = rtrim($website->base_url, '/');
-        $username = $website->ff_username;
-        $password = $website->ff_app_password;
-
+        $base = rtrim($website->base_url, '/').'/wp-json/fluentform/v1';
+        $endpoints = ["$base/forms/$formId/submissions", "$base/forms/$formId/entries", "$base/submissions"];
         $response = null;
-        $data = null;
-        
-        $endpoints = [
-            "{$baseUrl}/wp-json/fluentform/v1/forms/{$formId}/submissions",
-            "{$baseUrl}/wp-json/fluentform/v1/forms/{$formId}/entries",
-            "{$baseUrl}/wp-json/fluentform/v1/submissions?form_id={$formId}",
-        ];
-
+        // The schema endpoint can precede this call (8 seconds). Bound all
+        // compatibility attempts together to keep one browser request short.
+        $deadline = microtime(true) + 12;
         foreach ($endpoints as $endpoint) {
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                throw new FluentSyncException("Fluent Forms did not respond on page $page. Retry to resume this page.");
+            }
             try {
-                $response = Http::timeout(60)
-                    ->withBasicAuth($username, $password)
-                    ->acceptJson()
-                    ->get($endpoint, [
-                        'per_page' => $perPage,
-                        'page' => $page,
-                    ]);
+                $response = Http::timeout(min(6, $remaining))->connectTimeout(min(3, $remaining))
+                    ->withBasicAuth($website->ff_username, $website->ff_app_password)
+                    ->acceptJson()->get($endpoint, ['form_id' => $formId, 'per_page' => $perPage, 'page' => $page]);
+            } catch (ConnectionException) {
+                throw new FluentSyncException("Fluent Forms did not respond on page $page. Retry to resume this page.");
+            }
+            if ($response->successful()) {
+                break;
+            }
+            // Try a compatibility route only when this endpoint is unsupported.
+            if (! in_array($response->status(), [404, 405], true)) {
+                throw new FluentSyncException("Fluent Forms returned HTTP {$response->status()} on page $page. Retry to resume this page.");
+            }
+        }
+        if (! $response?->successful()) {
+            throw new FluentSyncException('No supported Fluent Forms submissions endpoint was found.');
+        }
+        try {
+            $decoded = json_decode($response->body(), false, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new FluentSyncException("Fluent Forms returned invalid JSON on page $page.");
+        }
+        [$submissions, $pagination] = $this->parseSubmissions($decoded);
+        $hasMore = count($submissions) >= $perPage;
+        $lastPage = $pagination['last_page'] ?? $pagination['total_pages'] ?? $response->header('X-WP-TotalPages');
+        if (is_numeric($lastPage) && (int) $lastPage >= 1) {
+            $hasMore = $page < (int) $lastPage;
+        } elseif (array_key_exists('next_page_url', $pagination)) {
+            $hasMore = ! empty($pagination['next_page_url']);
+        }
+        if ($submissions === [] && $hasMore) {
+            throw new FluentSyncException('Fluent Forms returned an empty page before the end of its pagination.');
+        }
 
-                if ($response->successful()) {
-                    $data = $response->json();
+        $normalized = [];
+        foreach ($submissions as $submission) {
+            $entry = json_decode(json_encode($submission, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+            if (! is_array($entry)) {
+                throw new FluentSyncException('Fluent Forms returned an invalid submission record.');
+            }
+            $id = $entry['id'] ?? $entry['entry_id'] ?? $entry['entryId'] ?? $entry['submission_id'] ?? null;
+            if (filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                throw new FluentSyncException('Fluent Forms returned a submission without a valid entry ID.');
+            }
+            // Scoped routes may omit form_id. The global fallback must identify
+            // every record, and explicit IDs must always match the requested form.
+            $entryFormId = $entry['form_id'] ?? ($endpoint !== "$base/submissions" ? $formId : null);
+            if (filter_var($entryFormId, FILTER_VALIDATE_INT) !== $formId) {
+                throw new FluentSyncException('Fluent Forms returned submissions for a different or unidentified form.');
+            }
+            $normalized[(int) $id] = $entry;
+        }
+        $ids = array_keys($normalized);
+        sort($ids, SORT_NUMERIC);
+
+        // A failed page is retried as a whole. Preserve webhook data and generated
+        // documents on existing entries; imports only fill missing records.
+        $count = DB::transaction(function () use ($website, $formId, $normalized) {
+            $count = 0;
+            $existing = FfSubmission::where('website_id', $website->id)->where('form_id', $formId)
+                ->whereIn('entry_id', array_keys($normalized))->pluck('entry_id')->flip();
+            foreach ($normalized as $id => $entry) {
+                if ($existing->has($id)) {
+                    continue;
+                }
+                $submission = FfSubmission::firstOrCreate([
+                    'website_id' => $website->id, 'form_id' => $formId, 'entry_id' => $id,
+                ], [
+                    'email' => $this->extractEmail($entry),
+                    'created_at_wp' => $entry['created_at'] ?? $entry['date_created'] ?? now(),
+                    'payload' => $entry,
+                ]);
+                $count += (int) $submission->wasRecentlyCreated;
+            }
+
+            return $count;
+        });
+
+        return ['count' => $count, 'updated' => 0, 'has_more' => $hasMore, 'entries_in_batch' => count($submissions), 'matched_count' => count($normalized), 'page_fingerprint' => hash('sha256', json_encode($ids))];
+    }
+
+    private function parseSubmissions(mixed $data): array
+    {
+        $pagination = [];
+        for ($depth = 0; $depth < 6; $depth++) {
+            if (is_array($data) && array_is_list($data)) {
+                return [$data, $pagination];
+            }
+            $values = is_object($data) ? get_object_vars($data) : (is_array($data) ? $data : []);
+            foreach (['last_page', 'total_pages', 'next_page_url'] as $key) {
+                if (array_key_exists($key, $values)) {
+                    $pagination[$key] = $values[$key];
+                }
+            }
+            $next = false;
+            foreach (['data', 'submissions', 'entries'] as $key) {
+                if (array_key_exists($key, $values)) {
+                    $data = $values[$key];
+                    $next = true;
                     break;
                 }
-            } catch (\Throwable $e) {
-                continue;
+            }
+            if (! $next) {
+                break;
             }
         }
 
-        if (!$response || !$response->successful()) {
-            return ['count' => 0, 'has_more' => false, 'entries_in_batch' => 0];
-        }
-
-        $submissions = $this->parseSubmissionsFromResponse($data);
-        
-        if (empty($submissions)) {
-            return ['count' => 0, 'has_more' => false, 'entries_in_batch' => 0];
-        }
-
-        $newEntriesCount = 0;
-        $matchedCount = 0;
-        $existingEntryIds = FfSubmission::where('website_id', $website->id)
-            ->where('form_id', $formId)
-            ->whereIn('entry_id', collect($submissions)->pluck('id')->filter()->toArray()) // Optimization: Only check IDs in this batch
-            ->pluck('entry_id')
-            ->toArray();
-
-        foreach ($submissions as $submission) {
-             // Try multiple possible ID fields
-             $entryId = data_get($submission, 'id') 
-             ?? data_get($submission, 'entry_id')
-             ?? data_get($submission, 'entryId')
-             ?? data_get($submission, 'submission_id');
-         
-            if (!$entryId) {
-                continue;
-            }
-
-            // STRICT SAFETY CHECK: Verify that the entry belongs to the requested form
-            // We must find the form_id in the submission and it must match what we requested.
-            $entryFormId = data_get($submission, 'form_id');
-            
-            if (!$entryFormId || (int)$entryFormId !== $formId) {
-                // Log only in debug to avoid noise, but this indicates a potential API issue or filtering failure
-                // Log::debug("Skipping entry {$entryId} because form_id mismatch. Found: " . ($entryFormId ?? 'null') . ", Expected: {$formId}");
-                continue;
-            }
-            
-            $matchedCount++;
-
-            if (in_array($entryId, $existingEntryIds)) {
-                continue;
-            }
-
-            $email = $this->extractEmailFromSubmission($submission);
-            $createdAt = data_get($submission, 'created_at') 
-                ?? data_get($submission, 'date_created') 
-                ?? now();
-
-            FfSubmission::create([
-                'website_id' => $website->id,
-                'form_id' => $formId,
-                'entry_id' => $entryId,
-                'email' => $email,
-                'created_at_wp' => $createdAt,
-                'payload' => $submission,
-            ]);
-
-            $newEntriesCount++;
-        }
-
-        $hasMore = count($submissions) >= $perPage;
-
-        return [
-            'count' => $newEntriesCount, 
-            'has_more' => $hasMore,
-            'entries_in_batch' => count($submissions),
-            'matched_count' => $matchedCount,
-        ];
+        throw new FluentSyncException('Fluent Forms returned an unrecognized submissions response.');
     }
 
-    private function parseSubmissionsFromResponse($data): array
+    private function extractEmail(array $entry): ?string
     {
-        if (is_array($data)) {
-            if (isset($data['data']) && is_array($data['data'])) {
-                return $data['data'];
-            } elseif (isset($data['submissions']) && is_array($data['submissions'])) {
-                return $data['submissions'];
-            } elseif (isset($data['entries']) && is_array($data['entries'])) {
-                return $data['entries'];
-            }
-             return $data;
-        } elseif (is_object($data)) {
-            if (isset($data->data) && is_array($data->data)) {
-                return $data->data;
-            } elseif (isset($data->submissions) && is_array($data->submissions)) {
-                return $data->submissions;
-            } elseif (isset($data->entries) && is_array($data->entries)) {
-                return $data->entries;
-            }
+        $fields = ['email', 'Email', 'EMAIL', 'email_address', 'emailAddress', 'user_email', 'contact_email'];
+        $response = $entry['response'] ?? [];
+        if (is_string($response)) {
+            $response = json_decode($response, true) ?? [];
         }
-        return [];
-    }
-
-    private function extractEmailFromSubmission(array $submission): ?string
-    {
-        $emailFields = [
-            'email', 'Email', 'EMAIL', 'email_address', 'emailAddress', 'user_email', 'contact_email',
-        ];
-
-        foreach ($emailFields as $field) {
-            if (!empty($submission[$field])) {
-                $email = filter_var($submission[$field], FILTER_VALIDATE_EMAIL);
-                if ($email) return $email;
-            }
-        }
-
-        if (isset($submission['response']) && is_array($submission['response'])) {
-            foreach ($emailFields as $field) {
-                $value = data_get($submission['response'], $field);
-                if (!empty($value)) {
-                    $email = filter_var($value, FILTER_VALIDATE_EMAIL);
-                    if ($email) return $email;
+        foreach ([$entry, is_array($response) ? $response : []] as $values) {
+            foreach ($fields as $key) {
+                if (is_string($values[$key] ?? null) && filter_var($values[$key], FILTER_VALIDATE_EMAIL)) {
+                    return $values[$key];
                 }
             }
         }
-
-        if (isset($submission['inputs']) && is_array($submission['inputs'])) {
-            foreach ($submission['inputs'] as $input) {
-                if (isset($input['name']) && in_array(strtolower($input['name']), array_map('strtolower', $emailFields))) {
-                    if (!empty($input['value'])) {
-                        $email = filter_var($input['value'], FILTER_VALIDATE_EMAIL);
-                        if ($email) return $email;
-                    }
-                }
+        foreach (is_array($entry['inputs'] ?? null) ? $entry['inputs'] : [] as $input) {
+            if (is_array($input) && is_string($input['name'] ?? null) && in_array(strtolower($input['name']), array_map('strtolower', $fields), true)
+                && is_string($input['value'] ?? null) && filter_var($input['value'], FILTER_VALIDATE_EMAIL)) {
+                return $input['value'];
             }
         }
 

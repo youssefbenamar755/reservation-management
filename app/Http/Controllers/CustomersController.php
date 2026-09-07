@@ -3,11 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\CustomersFilterRequest;
-use App\Models\WcOrder;
-use App\Models\Website;
 use App\Services\CustomerListing;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -91,41 +88,19 @@ class CustomersController extends Controller
         return preg_match('/^[\s\x00-\x1F]*[=+\-@\t\r\n]/u', $value) ? "'".$value : $value;
     }
 
-    public function show(Request $request, string $email)
+    public function show(CustomersFilterRequest $request, string $email)
     {
-        $user = $request->user();
-        $userWebsiteIds = Website::query()
-            ->when(! $user->is_admin, fn ($query) => $query->where('user_id', $user->id))
-            ->pluck('id')
-            ->all();
-
-        // Decode email if needed
-        $email = urldecode($email);
-
-        // Get all orders for this customer
-        $ordersQuery = WcOrder::query()
-            ->whereIn('website_id', $userWebsiteIds)
-            ->with('website')
-            ->where('customer_email', $email);
-
-        // Apply date range filter if provided
-        if ($request->filled('start_date') && $request->filled('end_date')) {
-            $startDate = Carbon::parse($request->input('start_date'))->startOfDay();
-            $endDate = Carbon::parse($request->input('end_date'))->endOfDay();
-            $ordersQuery->whereBetween('created_at_wp', [$startDate, $endDate]);
-        }
-
-        $orders = $ordersQuery->orderBy('created_at_wp', 'desc')->get();
-
-        if ($orders->isEmpty()) {
-            abort(404, 'Customer not found');
-        }
+        $filters = $request->filters();
+        $authorizedWebsites = $this->listing->websites($request->user());
+        // Route parameters are already decoded; decoding again corrupts plus addresses.
+        $ordersQuery = $this->listing->orders($authorizedWebsites->pluck('id')->all(), $filters, $email);
+        $aggregate = $this->listing->customers($ordersQuery, $filters)->first();
+        abort_if($aggregate === null, 404, 'Customer not found in the selected filters');
+        $summary = $this->listing->enrich(collect([$aggregate]), $ordersQuery, $authorizedWebsites)->first();
+        $orders = (clone $ordersQuery)->with('website')->orderBy('created_at_wp', 'desc')->orderByDesc('id')->get();
 
         // Calculate customer metrics
-        $totalOrders = $orders->count();
         $paidOrders = $orders->where('status', 'completed');
-        $totalSpent = $paidOrders->sum('total');
-        $averageOrderValue = $paidOrders->count() > 0 ? ($totalSpent / $paidOrders->count()) : 0;
 
         // Get unique websites
         $websites = $orders->pluck('website')
@@ -137,9 +112,6 @@ class CustomersController extends Controller
                 'name' => $website->name,
             ])
             ->toArray();
-
-        // Get country (most frequent)
-        $country = $this->listing->customerCountry($email, $userWebsiteIds);
 
         // Revenue over time (grouped by date)
         $revenueOverTime = $paidOrders
@@ -203,23 +175,15 @@ class CustomersController extends Controller
 
         return Inertia::render('Customers/Show', [
             'customer' => [
-                'email' => $email,
+                'email' => $summary['email'],
                 'name' => $customerName,
-                'total_orders' => $totalOrders,
-                'total_spent' => $totalSpent,
-                'average_order_value' => $averageOrderValue,
+                'total_orders' => $summary['orders_count'],
+                'total_spent' => $summary['total_spent'],
+                'average_order_value' => $summary['average_order_value'],
                 'websites' => $websites,
-                'country' => $country,
-                'first_order_at' => ($firstOrder = $orders->min('created_at_wp'))
-                    ? (is_string($firstOrder)
-                        ? Carbon::parse($firstOrder)->format('Y-m-d H:i:s')
-                        : $firstOrder->format('Y-m-d H:i:s'))
-                    : null,
-                'last_order_at' => ($lastOrder = $orders->max('created_at_wp'))
-                    ? (is_string($lastOrder)
-                        ? Carbon::parse($lastOrder)->format('Y-m-d H:i:s')
-                        : $lastOrder->format('Y-m-d H:i:s'))
-                    : null,
+                'country' => $summary['country'],
+                'first_order_at' => $summary['first_order_at'],
+                'last_order_at' => $summary['last_order_at'],
             ],
             'orders' => $orders->map(fn ($order) => [
                 'id' => $order->id,
@@ -233,6 +197,12 @@ class CustomersController extends Controller
             'revenueOverTime' => $revenueOverTime,
             'websiteBreakdown' => $websiteBreakdown,
             'countryHistory' => $countryHistory,
+            'filters' => $filters,
+            'returnUrl' => route('customers.index', array_filter([
+                ...$filters,
+                'page' => $request->validated('page'),
+                'per_page' => $request->validated('per_page'),
+            ], fn ($value) => $value !== null && $value !== [] && $value !== '')),
         ]);
     }
 }

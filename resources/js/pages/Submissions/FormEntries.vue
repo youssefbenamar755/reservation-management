@@ -4,9 +4,10 @@ import { type BreadcrumbItem } from '@/types'
 import { Head, router } from '@inertiajs/vue3'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, ChevronLeft, ChevronRight, Trash2, RefreshCw } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { Link } from '@inertiajs/vue3'
 import { useToast } from '@/composables/useToast'
+import { requestFluentFormsPage, runFluentFormsSync } from '@/lib/fluentFormsSync'
 
 const props = defineProps<{
   entries: any
@@ -23,6 +24,31 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => [
 const toast = useToast()
 const deletingId = ref<number | null>(null)
 const isSyncingSchema = ref(false)
+const syncProgress = ref('')
+const syncError = ref('')
+let syncController: AbortController | null = null
+let disposed = false
+let removeNavigationListener: (() => void) | null = null
+
+function stopSchemaSync() {
+  syncController?.abort()
+}
+
+watch(() => `${props.website.id}/${props.formId}`, () => {
+  stopSchemaSync()
+  syncProgress.value = ''
+  syncError.value = ''
+}, { flush: 'sync' })
+onMounted(() => {
+  removeNavigationListener = router.on('before', ({ detail: { visit } }) => {
+    if (!visit.async && visit.url.pathname !== `/submissions/forms/${props.website.id}/${props.formId}`) stopSchemaSync()
+  })
+})
+onUnmounted(() => {
+  disposed = true
+  stopSchemaSync()
+  removeNavigationListener?.()
+})
 
 function deleteEntry(entryId: number, submissionId: number, event: Event) {
   event.stopPropagation()
@@ -67,7 +93,7 @@ function goToPage(url: string | null) {
         only: ['entries']
       })
     }
-  } catch (e) {
+  } catch {
     // If URL parsing fails, try using it directly as a path
     router.get(url, {}, {
       preserveState: true,
@@ -125,7 +151,7 @@ function getEntryEmail(entry: any): string | null {
     if (typeof response === 'string') {
       try {
         response = JSON.parse(response)
-      } catch (e) {
+      } catch {
         // If parsing fails, return null
         return null
       }
@@ -255,19 +281,38 @@ function getPaymentAmount(entry: any): string | null {
   return null
 }
 
-function syncFormSchema() {
+async function syncFormSchema() {
+  if (isSyncingSchema.value) return
+  const websiteId = props.website.id
+  const formId = props.formId
+  const controller = new AbortController()
+  syncController = controller
   isSyncingSchema.value = true
-  router.post(`/submissions/forms/${props.website.id}/${props.formId}/sync-schema`, {}, {
-    preserveScroll: true,
-    onSuccess: () => {
+  syncProgress.value = 'Syncing form and submissions… Completed pages are saved so you can stop and resume.'
+  syncError.value = ''
+  try {
+    const result = await runFluentFormsSync(
+      () => requestFluentFormsPage(`/submissions/forms/${websiteId}/${formId}/sync-schema`, {}, controller.signal),
+      (progress) => { syncProgress.value = `${progress.pages} page(s) saved · ${progress.synced} new, ${progress.updated} updated. You can stop and resume.` },
+      { signal: controller.signal },
+    )
+    if (disposed || controller.signal.aborted) return
+    syncProgress.value = `Sync complete — ${result.synced} new submission(s), ${result.updated} updated.`
+    toast.success(syncProgress.value)
+    router.reload({ only: ['entries', 'formName'] })
+  } catch (error: any) {
+    if (disposed || props.website.id !== websiteId || props.formId !== formId) return
+    if (controller.signal.aborted) syncProgress.value = 'Sync stopped. Completed pages are saved; sync again to resume.'
+    else {
+      syncError.value = error?.message || 'Sync failed. Completed pages are saved; try again to resume.'
+      toast.error(syncError.value)
+    }
+  } finally {
+    if (syncController === controller) {
       isSyncingSchema.value = false
-      toast.success('Form schema synced successfully')
-    },
-    onError: () => {
-      isSyncingSchema.value = false
-      toast.error('Failed to sync form schema')
-    },
-  })
+      syncController = null
+    }
+  }
 }
 </script>
 
@@ -279,8 +324,8 @@ function syncFormSchema() {
       class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex min-w-0 flex-wrap items-center gap-4">
           <Link href="/submissions">
             <Button variant="outline" size="sm">
               <ArrowLeft class="mr-2 h-4 w-4" />
@@ -294,6 +339,7 @@ function syncFormSchema() {
             </p>
           </div>
         </div>
+        <div class="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -301,9 +347,13 @@ function syncFormSchema() {
           @click="syncFormSchema"
         >
           <RefreshCw :class="['mr-2 h-4 w-4', isSyncingSchema && 'animate-spin']" />
-          {{ isSyncingSchema ? 'Syncing...' : 'Sync Form Schema' }}
+          {{ isSyncingSchema ? 'Syncing...' : 'Sync Form & Entries' }}
         </Button>
+        <Button v-if="isSyncingSchema" variant="outline" size="sm" @click="stopSchemaSync">Stop sync</Button>
+        </div>
       </div>
+      <p v-if="syncProgress" class="text-sm text-muted-foreground" role="status">{{ syncProgress }}</p>
+      <p v-if="syncError" class="text-sm text-destructive" role="alert">{{ syncError }}</p>
 
       <!-- ENTRIES TABLE -->
       <div
@@ -506,4 +556,3 @@ function syncFormSchema() {
     </div>
   </AppLayout>
 </template>
-
