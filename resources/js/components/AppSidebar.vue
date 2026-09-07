@@ -13,7 +13,17 @@ import {
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FileText, Folder, Globe, LayoutGrid, ShoppingCart, TrendingUp, Users } from 'lucide-vue-next';
+import {
+    Activity,
+    BookOpen,
+    FileText,
+    Folder,
+    Globe,
+    LayoutGrid,
+    ShoppingCart,
+    TrendingUp,
+    Users,
+} from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const mainNavItems: NavItem[] = [
@@ -31,6 +41,11 @@ const mainNavItems: NavItem[] = [
         title: 'Websites',
         href: '/websites',
         icon: Globe,
+    },
+    {
+        title: 'Website health',
+        href: '/website-health',
+        icon: Activity,
     },
     {
         title: 'Orders',
@@ -59,7 +74,7 @@ const footerNavItems: NavItem[] = [
         title: 'Documentation',
         href: 'https://laravel.com/docs/starter-kits#vue',
         icon: BookOpen,
-    }
+    },
 ];
 </script>
 
@@ -84,7 +99,6 @@ const footerNavItems: NavItem[] = [
         <SidebarFooter>
             <NavFooter :items="footerNavItems" />
             <NavUser />
-            
         </SidebarFooter>
     </Sidebar>
     <slot />

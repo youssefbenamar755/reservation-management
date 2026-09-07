@@ -21,7 +21,15 @@ class ProcessFluentWebhookEvent implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(public int $webhookEventId) {}
+    public bool $skippedExisting = false;
+
+    // A class default also covers jobs serialized before this option existed.
+    public bool $preserveExisting = false;
+
+    public function __construct(public int $webhookEventId, bool $preserveExisting = false)
+    {
+        $this->preserveExisting = $preserveExisting;
+    }
 
     public function handle(): void
     {
@@ -122,12 +130,26 @@ class ProcessFluentWebhookEvent implements ShouldQueue
             }
         }
 
+        $identity = [
+            'website_id' => $event->website_id,
+            'form_id' => (int) $formId,
+            'entry_id' => (int) $entryId,
+        ];
+        $existingSubmission = $this->preserveExisting ? FfSubmission::where($identity)->first() : null;
+        if ($this->preserveExisting && $existingSubmission) {
+            $this->skippedExisting = true;
+            $event->update(['status' => 'processed', 'processed_at' => now(), 'error_message' => null]);
+
+            return;
+        }
+
         // Auto-sync form schema only if we don't already have one cached.
         // Calling syncFormSchema() makes a blocking HTTP request to WordPress — expensive.
         // If the schema is missing, dispatch a dedicated background job instead of
         // blocking this queue worker thread.
         $website = $event->website;
-        if ($website) {
+        // Manual recovery replays only the saved payload; schema sync is a separate action.
+        if ($website && ! $this->preserveExisting) {
             $schemaExists = FfForm::where('website_id', $website->id)
                 ->where('form_id', (int) $formId)
                 ->exists();
@@ -139,29 +161,27 @@ class ProcessFluentWebhookEvent implements ShouldQueue
             }
         }
 
-        // Check if submission already exists to only notify on new submissions
-        $existingSubmission = FfSubmission::where('website_id', $event->website_id)
-            ->where('form_id', (int) $formId)
-            ->where('entry_id', (int) $entryId)
-            ->first();
+        // Preserve normal ingestion's check immediately after any schema work.
+        if (! $this->preserveExisting) {
+            $existingSubmission = FfSubmission::where($identity)->first();
+        }
 
-        $submission = FfSubmission::updateOrCreate(
-            [
-                'website_id' => $event->website_id,
-                'form_id' => (int) $formId,
-                'entry_id' => (int) $entryId,
-            ],
-            [
-                'email' => $email,
-                'payment_status' => $paymentStatus,
-                'amount' => $amount,
-                'created_at_wp' => $createdAt,
-                'payload' => $finalPayload,
-            ]
-        );
+        $values = [
+            'email' => $email,
+            'payment_status' => $paymentStatus,
+            'amount' => $amount,
+            'created_at_wp' => $createdAt,
+            'payload' => $finalPayload,
+        ];
+        // firstOrCreate also handles a concurrent unique-key insert, keeping the
+        // winning record intact even when it appeared after the precheck above.
+        $submission = $this->preserveExisting
+            ? FfSubmission::firstOrCreate($identity, $values)
+            : FfSubmission::updateOrCreate($identity, $values);
+        $this->skippedExisting = $this->preserveExisting && ! $submission->wasRecentlyCreated;
 
         // Notify all admin users if this is a new submission
-        if (! $existingSubmission) {
+        if ($this->preserveExisting ? $submission->wasRecentlyCreated : ! $existingSubmission) {
             $adminUsers = User::where('is_admin', true)->get();
 
             Log::info('FluentWebhook: sending notifications', [
@@ -195,13 +215,14 @@ class ProcessFluentWebhookEvent implements ShouldQueue
         } else {
             Log::info('FluentWebhook: duplicate submission — notification skipped', [
                 'webhook_event_id' => $this->webhookEventId,
-                'existing_submission' => $existingSubmission->id,
+                'existing_submission' => $submission->id,
             ]);
         }
 
         $event->update([
             'status' => 'processed',
             'processed_at' => now(),
+            'error_message' => null,
         ]);
     }
 
