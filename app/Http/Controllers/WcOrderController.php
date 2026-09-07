@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\OrderListFilterRequest;
 use App\Models\FfSubmission;
 use App\Models\WcOrder;
 use App\Models\Website;
 use App\Services\AmadeusDummyTicketGeneratorService;
 use App\Services\WooCommerceOrderStore;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -15,36 +17,70 @@ use Inertia\Inertia;
 
 class WcOrderController extends Controller
 {
-    public function index(Request $request)
+    public function index(OrderListFilterRequest $request)
     {
-        $user = auth()->user();
+        $user = $request->user();
+        $filters = $request->filters();
 
         // Get user's website IDs for filtering
         $userWebsiteIds = Website::when(! $user->is_admin, fn ($q) => $q->where('user_id', $user->id))
             ->pluck('id');
+        abort_if(isset($filters['website_id']) && ! $userWebsiteIds->contains($filters['website_id']), 403);
 
-        $orders = WcOrder::query()
+        $query = WcOrder::query()->whereIn('website_id', $userWebsiteIds);
+        if (isset($filters['website_id'])) {
+            $query->where('website_id', $filters['website_id']);
+        }
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
+        if (isset($filters['search']) && $filters['search'] !== '') {
+            $pattern = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['search']).'%';
+            $query->where(fn ($search) => $search
+                ->whereRaw("wp_order_id LIKE ? ESCAPE '!'", [$pattern])
+                ->orWhereRaw("customer_name LIKE ? ESCAPE '!'", [$pattern])
+                ->orWhereRaw("customer_email LIKE ? ESCAPE '!'", [$pattern]));
+        }
+        if (! empty($filters['start_date'])) {
+            $query->where('created_at_wp', '>=', CarbonImmutable::parse($filters['start_date'], config('app.timezone'))->startOfDay());
+        }
+        if (! empty($filters['end_date'])) {
+            $query->where('created_at_wp', '<', CarbonImmutable::parse($filters['end_date'], config('app.timezone'))->addDay()->startOfDay());
+        }
+
+        $summary = ['completed' => 0, 'pending' => 0, 'on_hold' => 0, 'processing' => 0, 'failed' => 0];
+        $revenue = [];
+        $groups = (clone $query)->selectRaw("status, UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'UNKNOWN')) AS currency_code, COUNT(*) AS count, SUM(total) AS total")
+            ->groupBy('status', 'currency_code')->get();
+        foreach ($groups as $group) {
+            $key = str_replace('-', '_', $group->status);
+            if (array_key_exists($key, $summary)) {
+                $summary[$key] += (int) $group->count;
+            }
+            if ($group->status === 'completed') {
+                $revenue[] = ['currency' => $group->currency_code, 'total' => round((float) $group->total, 2)];
+            }
+        }
+        usort($revenue, fn ($left, $right) => strcmp($left['currency'], $right['currency']));
+        $summary['completed_revenue'] = $revenue;
+
+        [$sortColumn, $sortDirection] = match ($filters['sort'] ?? 'newest') {
+            'oldest' => ['created_at_wp', 'asc'],
+            'highest' => ['total', 'desc'],
+            'lowest' => ['total', 'asc'],
+            default => ['created_at_wp', 'desc'],
+        };
+        $orders = $query
             ->select([
                 'id', 'website_id', 'wp_order_id', 'status', 'currency', 'total',
                 'customer_email', 'customer_name', 'created_at_wp',
             ])
             ->with('website:id,name')
-            ->whereIn('website_id', $userWebsiteIds) // Only show orders from user's websites
-            ->when($request->website_id, fn ($q) => $q->where('website_id', $request->website_id)
-            )
-            ->when($request->status, fn ($q) => $q->where('status', $request->status)
-            )
-            ->when($request->search, fn ($q) => $q->where(function ($query) use ($request) {
-                $search = $request->search;
-                $query->where('wp_order_id', 'like', "%{$search}%")
-                    ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('customer_email', 'like', "%{$search}%");
-            })
-            )
-            ->latest('created_at_wp')
-            ->latest('id')
-            ->paginate(15)
-            ->withQueryString();
+            ->orderBy($sortColumn, $sortDirection)->orderBy('id', $sortDirection)
+            ->paginate($filters['per_page'] ?? 15)
+            ->withQueryString()->toArray();
+        $orders['summary'] = $summary;
+        $orders['timezone'] = config('app.timezone');
 
         if ($request->expectsJson() && ! $request->header('X-Inertia')) {
             return response()->json(['orders' => $orders])
@@ -56,7 +92,7 @@ class WcOrderController extends Controller
             'websites' => fn () => Website::when(! $user->is_admin, fn ($q) => $q->where('user_id', $user->id))
                 ->select('id', 'name')
                 ->get(),
-            'filters' => $request->only(['website_id', 'status', 'search']),
+            'filters' => $filters,
         ]);
     }
 

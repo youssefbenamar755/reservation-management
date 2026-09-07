@@ -213,7 +213,7 @@ test('orders JSON refresh preserves tenant scope and returns only the grid pagin
     ], array_keys($response->json('orders.data.0')));
 
     $this->getJson(route('orders.index', ['website_id' => $otherWebsite->id]))
-        ->assertOk()->assertJsonCount(0, 'orders.data');
+        ->assertForbidden();
     $this->actingAs(User::factory()->create(['is_admin' => true]))
         ->getJson(route('orders.index'))->assertOk()->assertJsonCount(2, 'orders.data');
     Http::assertNothingSent();
