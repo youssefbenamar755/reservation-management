@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import FlightCard from '@/components/FlightCard.vue';
 import OrderNotes from '@/components/OrderNotes.vue';
+import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,6 +14,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/composables/useToast';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { isPhoneField } from '@/lib/whatsapp';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import {
@@ -781,12 +783,10 @@ const flightData = computed(() => {
                                             <Phone
                                                 class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground sm:mt-0"
                                             />
-                                            <a
-                                                :href="`tel:${billing.phone}`"
-                                                class="text-sm break-all text-primary hover:underline sm:break-normal"
-                                            >
-                                                {{ billing.phone }}
-                                            </a>
+                                            <EntryFieldValue
+                                                :value="billing.phone"
+                                                phone
+                                            />
                                         </div>
 
                                         <div
@@ -967,7 +967,13 @@ const flightData = computed(() => {
                                         >
                                             {{ field.label }}:
                                         </span>
+                                        <EntryFieldValue
+                                            v-if="isPhoneField(field)"
+                                            :value="field.value"
+                                            phone
+                                        />
                                         <span
+                                            v-else
                                             class="text-left font-medium break-words text-foreground sm:text-right"
                                         >
                                             {{ formatFieldValue(field) }}
