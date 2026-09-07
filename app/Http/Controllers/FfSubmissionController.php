@@ -86,7 +86,7 @@ class FfSubmissionController extends Controller
     /**
      * Get available forms for a website (for sync modal)
      */
-    public function getFormsForWebsite(Website $website)
+    public function getFormsForWebsite(Website $website, \App\Services\FluentFormsCatalog $catalog)
     {
         // Authorize that user can view this website
         $this->authorize('view', $website);
@@ -96,51 +96,10 @@ class FfSubmissionController extends Controller
         }
 
         try {
-            $baseUrl = rtrim($website->base_url, '/');
-            $endpoint = "{$baseUrl}/wp-json/fluentform/v1/forms";
-
-            $response = Http::timeout(8)
-                ->connectTimeout(5)
-                ->withBasicAuth($website->ff_username, $website->ff_app_password)
-                ->acceptJson()
-                ->get($endpoint);
-
-            if (!$response->successful()) {
-                return response()->json(['error' => 'Failed to fetch forms'], $response->status());
-            }
-
-            $formsData = $response->json();
-            $forms = [];
-
-            if (is_array($formsData)) {
-                foreach ($formsData as $form) {
-                    if (is_numeric($form)) {
-                        $forms[] = ['id' => (int) $form, 'title' => "Form #{$form}"];
-                    } elseif (is_array($form) && isset($form[0]) && is_array($form[0])) {
-                        foreach ($form as $nestedForm) {
-                            if (isset($nestedForm['id'])) {
-                                $forms[] = [
-                                    'id' => (int) $nestedForm['id'],
-                                    'title' => $nestedForm['title'] ?? "Form #{$nestedForm['id']}"
-                                ];
-                            }
-                        }
-                    } elseif (is_array($form) && isset($form['id'])) {
-                        $forms[] = [
-                            'id' => (int) $form['id'],
-                            'title' => $form['title'] ?? "Form #{$form['id']}"
-                        ];
-                    }
-                }
-            }
-
-            return response()->json(['forms' => $forms]);
+            return response()->json(['forms' => $catalog->fetch($website)])->header('Cache-Control', 'private, no-store');
         } catch (\Throwable $e) {
-            Log::error('Failed to fetch forms', [
-                'website_id' => $website->id,
-                'error' => $e->getMessage(),
-            ]);
-            return response()->json(['error' => $e->getMessage()], 500);
+            $message = $e instanceof \App\Exceptions\FluentSyncException ? $e->getMessage() : 'Failed to fetch the complete forms list. Try again.';
+            return response()->json(['error' => $message], 502)->header('Cache-Control', 'private, no-store');
         }
     }
 
@@ -230,7 +189,7 @@ class FfSubmissionController extends Controller
     /**
      * Sync form schema for all forms in a website
      */
-    public function syncAllFormSchemas(Website $website, FluentFormSchemaService $service)
+    public function syncAllFormSchemas(Website $website, FluentFormSchemaService $service, \App\Services\FluentFormsCatalog $catalog)
     {
         $this->authorize('update', $website);
         abort_if($website->status !== 'active', 403, 'Website is not active');
@@ -241,38 +200,12 @@ class FfSubmissionController extends Controller
         }
 
         try {
-            $baseUrl = rtrim($website->base_url, '/');
-            $endpoint = "{$baseUrl}/wp-json/fluentform/v1/forms";
-
-            $response = Http::timeout(8)
-                ->connectTimeout(5)
-                ->withBasicAuth($website->ff_username, $website->ff_app_password)
-                ->acceptJson()
-                ->get($endpoint);
-
-            if (!$response->successful()) {
-                return back()->with('error', 'Failed to fetch forms list.');
-            }
-
-            $formsData = json_decode($response->body(), false, 512, JSON_THROW_ON_ERROR);
-            for ($depth = 0; $depth < 4 && is_object($formsData); $depth++) {
-                $formsData = $formsData->forms ?? $formsData->data ?? null;
-            }
-            if (!is_array($formsData) || !array_is_list($formsData)) {
-                return back()->with('error', 'Fluent Forms returned an invalid forms list. No schemas were imported.');
-            }
-            $formIds = [];
-            foreach ($formsData as $form) {
-                $formId = filter_var(is_object($form) ? ($form->id ?? null) : $form, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-                if ($formId === false) {
-                    return back()->with('error', 'Fluent Forms returned an invalid form ID. No schemas were imported.');
-                }
-                $formIds[$formId] = $formId;
-            }
+            $forms = $catalog->fetch($website);
             $syncedCount = 0;
             $failedCount = 0;
 
-            foreach ($formIds as $formId) {
+            foreach ($forms as $form) {
+                $formId = $form['id'];
                 $result = $service->syncFormSchema($website, $formId);
                 if ($result) {
                     if (config('queue.connections.'.config('queue.default').'.driver') !== 'sync') {
