@@ -33,6 +33,7 @@ export function createAutoRefresh(options: {
   let started = false
   let suspended = false
   let pending = false
+  let freshPending = false
   let failures = 0
   let timer: Timer | null = null
   let timerKind: 'retry' | 'event' | null = null
@@ -67,6 +68,7 @@ export function createAutoRefresh(options: {
     timerKind = null
     if (!available() || active) return
     pending = false
+    freshPending = false
     const request: { cancel?: () => void } = {}
     active = request
     state.refreshing = true
@@ -106,7 +108,18 @@ export function createAutoRefresh(options: {
     failures = 0
     pending = true
     if (!available() || active || timerKind === 'event') return
-    schedule(delay, 'event')
+    if (freshPending) run()
+    else schedule(delay, 'event')
+  }
+
+  function requestFresh() {
+    // A mutation makes any earlier snapshot stale, including a queued prop update.
+    failures = 0
+    pending = true
+    freshPending = true
+    clearScheduled()
+    cancelActive()
+    if (available()) run()
   }
 
   return {
@@ -114,8 +127,10 @@ export function createAutoRefresh(options: {
       if (started) return
       started = true
       emit()
+      if (freshPending && available()) run()
     },
     request,
+    requestFresh,
     suspend() {
       suspended = true
       pending = true
@@ -138,6 +153,7 @@ export function createAutoRefresh(options: {
     stop() {
       started = false
       pending = false
+      freshPending = false
       clearScheduled()
       cancelActive()
     },

@@ -60,6 +60,7 @@ export interface DashboardProps {
         website_id: number;
         website_name: string;
         status: string;
+        can_update_status: boolean;
         total: number | string;
         currency: string;
         customer_email: string | null;

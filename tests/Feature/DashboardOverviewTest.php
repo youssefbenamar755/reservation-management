@@ -56,6 +56,16 @@ function dashboardWebhook(Website $website, string $status, string $received, st
         'received_at' => $received, 'processed_at' => '2026-09-07 12:00:00', 'payload' => ['private' => 'must-not-load']]);
 }
 
+test('dashboard order status permissions use the same update policy without loading payloads', function () {
+    dashboardOrder($this->website, 1);
+    expect(app(DashboardOverview::class)->build($this->owner, [])['recentOrders'][0]['can_update_status'])->toBeTrue();
+    $this->partialMock(\App\Policies\WcOrderPolicy::class, function ($mock) {
+        $mock->shouldReceive('update')->once()->andReturn(false);
+    });
+    $order = app(DashboardOverview::class)->build($this->owner, [])['recentOrders'][0];
+    expect($order['can_update_status'])->toBeFalse()->and($order)->not->toHaveKeys(['payload', 'user_id']);
+});
+
 test('dashboard separates currencies and uses only completed orders for revenue and AOV', function () {
     dashboardOrder($this->website, 1, values: ['currency' => 'usd', 'total' => 10.10, 'customer_email' => ' Mixed@Example.test ']);
     dashboardOrder($this->website, 2, values: ['currency' => 'USD', 'total' => 20.20, 'customer_email' => 'mixed@example.test']);

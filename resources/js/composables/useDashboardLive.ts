@@ -165,5 +165,5 @@ export function useDashboardLive(options: {
     window.removeEventListener('popstate', suspendForHistory)
   })
 
-  return { connectionState, refreshState, isRefreshing, refresh: () => coordinator.request(0) }
+  return { connectionState, refreshState, isRefreshing, refresh: () => coordinator.request(0), refreshAfterMutation: () => coordinator.requestFresh() }
 }

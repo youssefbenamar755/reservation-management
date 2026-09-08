@@ -178,3 +178,71 @@ test('status confirmation preserves omitted optional order details while honorin
         ->and($payload['billing']['country'])->toBe('MA')
         ->and($this->order->customer_email)->toBe('customer@example.com');
 })->with([false, true]);
+
+test('inline status JSON returns only fresh confirmed order status for owners and admins', function (bool $admin) {
+    $confirmed = array_replace($this->payload, ['status' => 'processing', 'date_modified_gmt' => '2026-09-01T12:00:00']);
+    Http::fake(['*' => Http::response($confirmed)]);
+    $actor = $admin ? User::factory()->create(['is_admin' => true]) : $this->user;
+    $response = $this->actingAs($actor)->putJson(route('orders.update', $this->order), ['status' => 'processing'])->assertOk()
+        ->assertExactJson(['message' => 'Order status updated successfully in WooCommerce and locally.', 'order' => ['id' => $this->order->id, 'status' => 'processing']]);
+    expect($response->headers->get('Cache-Control'))->toContain('private', 'no-store');
+    expect($response->getContent())->not->toContain('test-key', 'test-secret', 'customer@example.com', 'payload');
+    Http::assertSentCount(1);
+})->with([false, true]);
+
+test('inline status JSON preserves website authorization and rejects missing or invalid status before WooCommerce', function () {
+    $this->putJson(route('orders.update', $this->order), ['status' => 'completed'])->assertUnauthorized();
+    $this->actingAs(User::factory()->create())->putJson(route('orders.update', $this->order), ['status' => 'completed'])->assertForbidden();
+    foreach ([[], ['status' => 'invented'], ['status' => ['completed']]] as $input) {
+        $response = $this->actingAs($this->user)->putJson(route('orders.update', $this->order), $input)->assertUnprocessable()
+            ->assertJsonValidationErrors('status')->assertJsonPath('order', ['id' => $this->order->id, 'status' => 'pending']);
+        expect($response->headers->get('Cache-Control'))->toContain('private', 'no-store');
+    }
+    Http::assertNothingSent();
+});
+
+test('inline status JSON reports missing credentials without a local status change', function () {
+    $this->website->update(['wc_consumer_secret' => null]);
+    $this->actingAs($this->user)->putJson(route('orders.update', $this->order), ['status' => 'completed'])
+        ->assertUnprocessable()->assertJsonPath('order', ['id' => $this->order->id, 'status' => 'pending']);
+    expect($this->order->refresh()->status)->toBe('pending');
+    Http::assertNothingSent();
+});
+
+test('inline status JSON distinguishes remote failures from a confirmed different status and returns fresh webhook state', function (string $case, int $httpStatus, string $expectedStatus) {
+    $confirmed = array_replace($this->payload, ['status' => 'processing', 'date_modified_gmt' => '2026-09-01T12:00:00']);
+    $newer = array_replace($this->payload, ['status' => 'completed', 'date_modified_gmt' => '2026-09-01T13:00:00']);
+    Http::fake(function () use ($case, $confirmed, $newer) {
+        if (in_array($case, ['newer webhook', 'failed with webhook', 'different with webhook'], true)) {
+            app(WooCommerceOrderStore::class)->store($this->website->id, $newer);
+        }
+
+        return match ($case) {
+            'rejected', 'failed with webhook' => Http::response(['message' => 'private remote credentials'], 503),
+            'timeout' => throw new \Illuminate\Http\Client\ConnectionException('private timeout detail'),
+            'incomplete' => Http::response(['id' => 42, 'status' => 'processing']),
+            'wrong order' => Http::response(array_replace($confirmed, ['id' => 99])),
+            'different', 'different with webhook' => Http::response(array_replace($confirmed, ['status' => 'on-hold'])),
+            default => Http::response($confirmed),
+        };
+    });
+    $response = $this->actingAs($this->user)->putJson(route('orders.update', $this->order), ['status' => 'processing'])
+        ->assertStatus($httpStatus)->assertJsonPath('order', ['id' => $this->order->id, 'status' => $expectedStatus]);
+    expect(array_keys($response->json()))->toBe(['message', 'order'])
+        ->and($response->getContent())->not->toContain('private remote', 'private timeout', 'test-secret', 'customer@example.com')
+        ->and($response->headers->get('Cache-Control'))->toContain('private', 'no-store')
+        ->and($this->order->refresh()->status)->toBe($expectedStatus);
+    if ($case === 'newer webhook') {
+        expect($response->json('message'))->toContain('newer order update was retained');
+    }
+})->with([
+    ['rejected', 502, 'pending'], ['timeout', 502, 'pending'], ['incomplete', 502, 'pending'], ['wrong order', 502, 'pending'],
+    ['different', 409, 'on-hold'], ['newer webhook', 200, 'completed'], ['failed with webhook', 502, 'completed'], ['different with webhook', 409, 'completed'],
+]);
+
+test('Inertia status requests still redirect with flash even when they accept JSON', function () {
+    $confirmed = array_replace($this->payload, ['status' => 'processing', 'date_modified_gmt' => '2026-09-01T12:00:00']);
+    Http::fake(['*' => Http::response($confirmed)]);
+    $this->actingAs($this->user)->from('/dashboard')->putJson(route('orders.update', $this->order), ['status' => 'processing'], ['X-Inertia' => 'true'])
+        ->assertRedirect('/dashboard')->assertSessionHas('success');
+});

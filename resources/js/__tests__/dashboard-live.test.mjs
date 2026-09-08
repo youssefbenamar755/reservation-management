@@ -191,6 +191,59 @@ test('Dashboard is single-flight and queues only one follow-up during a slow res
   assert.equal(app.fetches.length, 2)
 })
 
+test('Dashboard mutation refresh prevents a pre-write deferred snapshot from reverting a confirmed status even if the fresh read fails', async (t) => {
+  const app = harness(t, { deferApply: true }); await app.start()
+  await app.respond(0, snapshot({ recentOrders: [{ id: 10, status: 'processing' }] }))
+  assert.equal(app.replacements.length, 1)
+  app.page.props.recentOrders = [{ id: 10, status: 'completed' }]
+  app.state.refreshAfterMutation()
+  assert.equal(app.fetches[0].options.signal.aborted, true)
+  assert.equal(app.fetches.length, 2)
+  app.apply(0); await flush()
+  assert.equal(app.page.props.recentOrders[0].status, 'completed')
+  assert.equal(app.state.isRefreshing.value, true)
+  app.fetches[1].resolve({ ok: false, status: 500 }); await flush()
+  assert.equal(app.page.props.recentOrders[0].status, 'completed')
+  assert.equal(app.state.refreshState.value.hasError, true)
+  assert.equal(app.state.refreshState.value.lastCheckedAt, null)
+})
+
+test('Dashboard mutation refresh gives its replacement a fresh deadline and discards an old late response', async (t) => {
+  const app = harness(t); await app.start()
+  app.clock.advance(10_000)
+  app.state.refreshAfterMutation(); await flush()
+  assert.equal(app.fetches.length, 2)
+  assert.equal(app.fetches[0].options.signal.aborted, true)
+  assert.equal(app.clock.pending, 1)
+  await app.respond(0, snapshot({ summary: { orders: 999 } }))
+  assert.equal(app.replacements.length, 0)
+  app.clock.advance(10_000); await flush()
+  assert.equal(app.fetches[1].options.signal.aborted, false)
+  assert.equal(app.state.isRefreshing.value, true)
+  await app.respond(1, snapshot({ summary: { orders: 12 } }))
+  assert.equal(app.page.props.summary.orders, 12)
+  app.clock.advance(300_000); await flush()
+  assert.equal(app.fetches.length, 2)
+  assert.equal(app.clock.pending, 0)
+})
+
+test('Dashboard mutation refresh waits for navigation then immediately reads the current filters', async (t) => {
+  const app = harness(t); await app.start()
+  const visit = { async: false }
+  app.routerEvents.emit('before', { detail: { visit } })
+  app.routerEvents.emit('start', { detail: { visit } })
+  app.state.refreshAfterMutation()
+  app.clock.advance(30_000); await flush()
+  assert.equal(app.fetches.length, 1)
+  app.location.search = '?range=week&website_id=2'
+  app.page.url = '/dashboard?range=week&website_id=2'
+  app.routerEvents.emit('finish', { detail: { visit } })
+  assert.equal(app.fetches.length, 2)
+  assert.match(app.fetches[1].url, /range=week&website_id=2/)
+  await app.respond(1, snapshot({ filters: { range: 'week', website_id: 2 } }))
+  assert.equal(app.page.props.filters.website_id, 2)
+})
+
 test('Dashboard pauses hidden/offline work and catches up once when visible and online', async (t) => {
   const app = harness(t); await app.start(); await app.respond()
   app.document.hidden = true; app.documentEvents.emit('visibilitychange')

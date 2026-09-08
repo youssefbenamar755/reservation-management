@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DashboardTrend from '@/components/charts/DashboardTrend.vue';
+import OrderStatusControl from '@/components/OrderStatusControl.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useDashboardLive } from '@/composables/useDashboardLive';
@@ -56,11 +57,16 @@ const periods = [
     { value: '30d', label: '30 days' },
     { value: 'month', label: 'This month' },
 ] as const;
-const { connectionState, refreshState, isRefreshing, refresh } =
-    useDashboardLive({
-        getUserId: () => page.props.auth?.user?.id,
-        getWebsiteId: () => props.filters.website_id,
-    });
+const {
+    connectionState,
+    refreshState,
+    isRefreshing,
+    refresh,
+    refreshAfterMutation,
+} = useDashboardLive({
+    getUserId: () => page.props.auth?.user?.id,
+    getWebsiteId: () => props.filters.website_id,
+});
 watch(
     () => [props.filters.period, props.filters.website_id] as const,
     ([period, website]) => {
@@ -236,25 +242,6 @@ function formatDate(value: string | null, compact = false): string {
         minute: '2-digit',
         timeZone: props.period.timezone,
     }).format(date);
-}
-function statusClass(status: string): string {
-    return (
-        (
-            {
-                completed:
-                    'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-                processing:
-                    'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300',
-                pending: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-                'on-hold':
-                    'bg-orange-500/10 text-orange-700 dark:text-orange-300',
-                failed: 'bg-rose-500/10 text-rose-700 dark:text-rose-300',
-                cancelled: 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-300',
-                refunded:
-                    'bg-violet-500/10 text-violet-700 dark:text-violet-300',
-            } as Record<string, string>
-        )[status] ?? 'bg-muted text-muted-foreground'
-    );
 }
 function statusDot(status: string): string {
     return (
@@ -1062,7 +1049,8 @@ function statusDot(status: string): string {
                                 Recent orders
                             </h2>
                             <p class="mt-1 text-xs text-muted-foreground">
-                                Latest in the selected period
+                                Latest in the selected period · Click a status
+                                to update
                             </p>
                         </div>
                         <Link
@@ -1074,24 +1062,29 @@ function statusDot(status: string): string {
                         /></Link>
                     </div>
                     <div class="divide-y border-t">
-                        <Link
+                        <article
                             v-for="order in recentOrders"
                             :key="order.id"
-                            :href="`/orders/${order.id}`"
                             class="group flex min-w-0 items-start justify-between gap-3 px-5 py-4 transition hover:bg-muted/30"
-                            ><div class="min-w-0">
+                        >
+                            <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <span
-                                        class="text-sm font-semibold group-hover:underline"
-                                        >#{{ order.wp_order_id }}</span
-                                    ><Badge
-                                        variant="secondary"
-                                        class="border-0 px-1.5 py-0.5 text-[10px] font-medium"
-                                        :class="statusClass(order.status)"
-                                        >{{
-                                            dashboardStatus(order.status)
-                                        }}</Badge
+                                    <Link
+                                        :href="`/orders/${order.id}`"
+                                        class="text-sm font-semibold hover:underline"
+                                        >#{{ order.wp_order_id }}</Link
                                     >
+                                    <OrderStatusControl
+                                        :order-id="order.id"
+                                        :order-number="order.wp_order_id"
+                                        :status="order.status"
+                                        :website-name="order.website_name"
+                                        :disabled="
+                                            filtering ||
+                                            !order.can_update_status
+                                        "
+                                        @settled="refreshAfterMutation"
+                                    />
                                 </div>
                                 <p
                                     class="mt-1.5 truncate text-xs text-muted-foreground"
@@ -1127,8 +1120,8 @@ function statusDot(status: string): string {
                                 >
                                     {{ formatDate(order.created_at_wp) }}
                                 </p>
-                            </div></Link
-                        >
+                            </div>
+                        </article>
                     </div>
                     <div
                         v-if="!recentOrders.length"
