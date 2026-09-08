@@ -17,6 +17,13 @@ const ui = {
   '@/components/ui/card': Object.fromEntries(['Card', 'CardContent', 'CardDescription', 'CardHeader', 'CardTitle'].map((name) => [name, wrap('section')])),
   '@/components/ui/button': { Button: wrap('button') },
   '@/components/ui/badge': { Badge: wrap('span') },
+  '@/components/OrderEmailComposer.vue': { default: vue.defineComponent({
+    props: ['orderId', 'orderNumber'],
+    setup: (props) => () => vue.h('button', {
+      'data-email-order': props.orderId,
+      'data-email-order-number': props.orderNumber,
+    }, 'Email documents'),
+  }) },
   '@/components/OrderStatusControl.vue': { default: vue.defineComponent({
     props: ['orderId', 'orderNumber', 'status', 'websiteName', 'disabled'],
     emits: ['updated', 'settled'],
@@ -258,6 +265,7 @@ test('linked order uses the local order ID for its link and control while submis
   assert.match(html, /href="\/orders\/73"/)
   assert.match(html, /Order #5401/)
   assert.match(html, /data-order-control="73" data-order-number="5401" data-website-name="Fixture website"/)
+  assert.match(html, /data-email-order="73" data-email-order-number="5401"/)
   assert.match(html, />processing<\/button>/)
   assert.match(html, /Submission: read/)
   assert.ok(!html.includes('No linked order'))
@@ -272,11 +280,13 @@ test('unlinked and read-only submissions cannot expose an enabled order status c
   assert.ok(unlinkedHtml.includes('No linked order'))
   assert.match(unlinkedHtml, /href="\/orders\?website_id=13"/)
   assert.ok(!unlinkedHtml.includes('data-order-control'))
+  assert.ok(!unlinkedHtml.includes('data-email-order'))
   page.state.refreshLinkedOrder({ id: 73 })
   assert.equal(page.calls.reloads.length, 0)
   page.props.linkedOrder = linkedOrder({ can_update_status: false })
   const readOnlyHtml = await page.render()
   assert.match(readOnlyHtml, /data-order-control="73"[^>]* disabled/)
+  assert.ok(!readOnlyHtml.includes('data-email-order'))
   assert.ok(readOnlyHtml.includes('cannot change its status'))
 })
 
