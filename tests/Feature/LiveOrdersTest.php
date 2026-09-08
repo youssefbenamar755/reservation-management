@@ -209,7 +209,7 @@ test('orders JSON refresh preserves tenant scope and returns only the grid pagin
         ->and($response->headers->get('Cache-Control'))->toContain('private', 'no-store');
     $this->assertEqualsCanonicalizing([
         'id', 'website_id', 'wp_order_id', 'status', 'currency', 'total',
-        'customer_email', 'customer_name', 'created_at_wp', 'website',
+        'customer_email', 'customer_name', 'created_at_wp', 'website', 'can_update_status',
     ], array_keys($response->json('orders.data.0')));
 
     $this->getJson(route('orders.index', ['website_id' => $otherWebsite->id]))

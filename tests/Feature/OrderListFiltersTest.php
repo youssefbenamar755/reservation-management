@@ -25,6 +25,15 @@ function listingOrder(Website $website, int $id, array $values = []): WcOrder
     ], $values));
 }
 
+test('orders list status permissions use the update policy without exposing website ownership', function () {
+    listingOrder($this->website, 1);
+    $this->partialMock(\App\Policies\WcOrderPolicy::class, function ($mock) {
+        $mock->shouldReceive('update')->once()->andReturn(false);
+    });
+    $this->actingAs($this->owner)->getJson(route('orders.index'))->assertOk()->assertJsonPath('orders.data.0.can_update_status', false)
+        ->assertJsonMissingPath('orders.data.0.website.user_id');
+});
+
 test('orders matching summary spans all pages and keeps completed currencies separate', function () {
     foreach (range(1, 20) as $id) {
         listingOrder($this->website, $id, ['currency' => $id <= 10 ? 'usd' : 'EUR', 'total' => 10.10]);
@@ -135,5 +144,6 @@ test('orders JSON uses five listing queries with no payload or named selector lo
     }
     expect(array_keys($response->json()))->toBe(['orders']);
     $response->assertJsonPath('orders.data.0.website', ['id' => $this->website->id, 'name' => 'Orders demo'])
+        ->assertJsonPath('orders.data.0.can_update_status', true)
         ->assertJsonMissingPath('websites')->assertJsonMissingPath('filters');
 });

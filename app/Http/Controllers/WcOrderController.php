@@ -75,9 +75,15 @@ class WcOrderController extends Controller
                 'id', 'website_id', 'wp_order_id', 'status', 'currency', 'total',
                 'customer_email', 'customer_name', 'created_at_wp',
             ])
-            ->with('website:id,name')
+            ->with('website:id,name,user_id')
             ->orderBy($sortColumn, $sortDirection)->orderBy('id', $sortDirection)
             ->paginate($filters['per_page'] ?? 15)
+            ->through(function ($order) use ($user) {
+                $order->can_update_status = $user->can('update', $order);
+                $order->website->makeHidden('user_id');
+
+                return $order;
+            })
             ->withQueryString()->toArray();
         $orders['summary'] = $summary;
         $orders['timezone'] = config('app.timezone');
@@ -217,9 +223,13 @@ class WcOrderController extends Controller
     {
         $this->authorize('update', $order);
 
-        $request->validate([
+        $validation = Validator::make($request->all(), [
             'status' => 'required|string|in:pending,processing,on-hold,completed,cancelled,refunded,failed',
         ]);
+        if ($validation->fails() && $request->expectsJson() && ! $request->header('X-Inertia')) {
+            return $this->statusResponse($request, $order, $validation->errors()->first('status'), 422, $validation->errors()->toArray());
+        }
+        $validation->validate();
 
         // Load website relationship to access credentials
         $order->load('website');
@@ -252,7 +262,7 @@ class WcOrderController extends Controller
                         'error_message' => $message,
                     ]);
 
-                    return back()->with('error', "WooCommerce rejected the status update (HTTP {$status}). The last confirmed status has been kept. Please retry.");
+                    return $this->statusResponse($request, $order, "WooCommerce rejected the status update (HTTP {$status}). The last confirmed status has been kept. Please retry.", 502);
                 }
 
                 // Use the same timestamp guard as sync and webhooks. A newer
@@ -274,7 +284,7 @@ class WcOrderController extends Controller
                 if (! $valid) {
                     Log::warning('WooCommerce status update returned an incomplete or mismatched order', ['order_id' => $order->id]);
 
-                    return back()->with('error', 'WooCommerce did not return a valid order confirmation. The last confirmed status has been kept; sync the order to check its latest status.');
+                    return $this->statusResponse($request, $order, 'WooCommerce did not return a valid order confirmation. The last confirmed status has been kept; sync the order to check its latest status.', 502);
                 }
                 // A confirmation can omit optional extension fields. Keep those
                 // fields rather than erasing linked entries or order items.
@@ -288,13 +298,13 @@ class WcOrderController extends Controller
                 }
                 $result = $orders->store($website->id, $confirmedPayload);
                 if ($wooOrder['status'] !== $request->status) {
-                    return back()->with('error', 'WooCommerce returned a different status. The latest confirmed status is shown; the requested change was not confirmed.');
+                    return $this->statusResponse($request, $order, 'WooCommerce returned a different status. The latest confirmed status is shown; the requested change was not confirmed.', 409);
                 }
                 if ($result['order']->status !== $wooOrder['status']) {
-                    return back()->with('success', 'WooCommerce accepted the status update. A newer order update was retained locally.');
+                    return $this->statusResponse($request, $order, 'WooCommerce accepted the status update. A newer order update was retained locally.');
                 }
 
-                return back()->with('success', 'Order status updated successfully in WooCommerce and locally.');
+                return $this->statusResponse($request, $order, 'Order status updated successfully in WooCommerce and locally.');
             } catch (\Throwable $e) {
                 Log::error('Exception while updating order status in WooCommerce', [
                     'order_id' => $order->id,
@@ -304,11 +314,26 @@ class WcOrderController extends Controller
                     'error' => $e->getMessage(),
                 ]);
 
-                return back()->with('error', 'The status update could not be confirmed. The last confirmed status has been kept; sync the order to check its latest status before retrying.');
+                return $this->statusResponse($request, $order, 'The status update could not be confirmed. The last confirmed status has been kept; sync the order to check its latest status before retrying.', 502);
             }
         } else {
-            return back()->with('error', 'Connect this website to WooCommerce before changing order statuses. The last confirmed status has been kept.');
+            return $this->statusResponse($request, $order, 'Connect this website to WooCommerce before changing order statuses. The last confirmed status has been kept.', 422);
         }
+    }
+
+    private function statusResponse(Request $request, WcOrder $order, string $message, int $status = 200, ?array $errors = null)
+    {
+        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+            $current = WcOrder::query()->select('id', 'status')->findOrFail($order->id);
+            $result = ['message' => $message, 'order' => $current->only('id', 'status')];
+            if ($errors !== null) {
+                $result['errors'] = $errors;
+            }
+
+            return response()->json($result, $status)->header('Cache-Control', 'private, no-store');
+        }
+
+        return back()->with($status < 400 ? 'success' : 'error', $message);
     }
 
     /**

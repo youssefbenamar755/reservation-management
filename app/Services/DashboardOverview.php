@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Models\WcOrder;
+use App\Models\Website;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +28,7 @@ class DashboardOverview
         $window = compact('start', 'end', 'previousStart', 'previousEnd');
 
         $websites = DB::table('websites')->when(! $user->is_admin, fn ($query) => $query->where('user_id', $user->id))
-            ->select('id', 'name', 'status', 'base_url', 'last_sync_at', 'last_webhook_at', 'wc_orders_synced_at')
+            ->select('id', 'user_id', 'name', 'status', 'base_url', 'last_sync_at', 'last_webhook_at', 'wc_orders_synced_at')
             ->orderBy('name')->orderBy('id')->get()->keyBy('id');
         $selectedId = isset($filters['website_id']) ? (int) $filters['website_id'] : null;
         abort_if($selectedId !== null && ! $websites->has($selectedId), 403);
@@ -135,12 +137,18 @@ class DashboardOverview
         $recentOrders = DB::table('wc_orders')->whereIn('website_id', $ids)->where('created_at_wp', '>=', $start)->where('created_at_wp', '<', $end)
             ->select('id', 'website_id', 'wp_order_id', 'status', 'total', 'currency', 'customer_email', 'customer_name', 'created_at_wp')
             ->orderByDesc('created_at_wp')->orderByDesc('id')->limit(10)->get()
-            ->map(fn ($order) => [
-                'id' => $order->id, 'website_id' => $order->website_id, 'wp_order_id' => $order->wp_order_id,
-                'website_name' => $selected[$order->website_id]->name, 'status' => $order->status,
-                'total' => (float) $order->total, 'currency' => strtoupper(trim($order->currency ?? '')) ?: 'UNKNOWN',
-                'customer_email' => $order->customer_email, 'customer_name' => $order->customer_name, 'created_at_wp' => $this->iso($order->created_at_wp),
-            ])->all();
+            ->map(function ($order) use ($user, $selected) {
+                $authorizationOrder = (new WcOrder)->forceFill((array) $order)->setRelation('website',
+                    (new Website)->forceFill(['id' => $order->website_id, 'user_id' => (int) $selected[$order->website_id]->user_id]));
+
+                return [
+                    'id' => $order->id, 'website_id' => $order->website_id, 'wp_order_id' => $order->wp_order_id,
+                    'website_name' => $selected[$order->website_id]->name, 'status' => $order->status,
+                    'can_update_status' => $user->can('update', $authorizationOrder),
+                    'total' => (float) $order->total, 'currency' => strtoupper(trim($order->currency ?? '')) ?: 'UNKNOWN',
+                    'customer_email' => $order->customer_email, 'customer_name' => $order->customer_name, 'created_at_wp' => $this->iso($order->created_at_wp),
+                ];
+            })->all();
         $recentSubmissions = DB::table('ff_submissions as submissions')->whereIn('submissions.website_id', $ids)
             ->where('submissions.created_at_wp', '>=', $start)->where('submissions.created_at_wp', '<', $end)
             ->leftJoin('ff_forms as forms', fn ($join) => $join->on('forms.website_id', '=', 'submissions.website_id')->on('forms.form_id', '=', 'submissions.form_id'))

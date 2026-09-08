@@ -17,6 +17,16 @@ const ui = {
   '@/components/ui/card': Object.fromEntries(['Card', 'CardContent', 'CardDescription', 'CardHeader', 'CardTitle'].map((name) => [name, wrap('section')])),
   '@/components/ui/button': { Button: wrap('button') },
   '@/components/ui/badge': { Badge: wrap('span') },
+  '@/components/OrderStatusControl.vue': { default: vue.defineComponent({
+    props: ['orderId', 'orderNumber', 'status', 'websiteName', 'disabled'],
+    emits: ['updated', 'settled'],
+    setup: (props) => () => vue.h('button', {
+      'data-order-control': props.orderId,
+      'data-order-number': props.orderNumber,
+      'data-website-name': props.websiteName,
+      disabled: props.disabled,
+    }, props.status),
+  }) },
 }
 function loadComponent(path, mocks, globals, ssr = false) {
   const content = path.endsWith('.vue')
@@ -62,7 +72,7 @@ function harness(t, response = {}, overrides = {}) {
     },
     '@/composables/useToast': { useToast: () => ({ error: (message) => calls.errors.push(message), success: (message) => calls.successes.push(message) }) },
   }
-  const props = vue.reactive({ entry: fixture(response, overrides), formSchema: { fields: { names: { label: 'Passenger names', type: 'name' }, notes_2: { label: 'Agent notes', type: 'text' } } } })
+  const props = vue.reactive({ entry: fixture(response, overrides), linkedOrder: null, formSchema: { fields: { names: { label: 'Passenger names', type: 'name' }, notes_2: { label: 'Agent notes', type: 'text' } } } })
   const component = loadComponent('pages/Submissions/EntryDetails.vue', mocks, globals)
   const scope = vue.effectScope()
   const state = scope.run(() => component.setup(props, { expose() {} }))
@@ -234,4 +244,69 @@ test('active submission fields link valid phone values through the shared render
   assert.ok(!html.includes('wa.me/1234567890'))
   page.state.copyToClipboard(originalPhones, 'phone'); await Promise.resolve()
   assert.equal(page.calls.copies[0], JSON.stringify(originalPhones, null, 2))
+})
+
+const linkedOrder = (overrides = {}) => ({
+  id: 73, wp_order_id: 5401, status: 'processing', website_name: 'Fixture website', can_update_status: true,
+  ...overrides,
+})
+
+test('linked order uses the local order ID for its link and control while submission status stays separate', async (t) => {
+  const page = harness(t, {}, { payment_status: 'paid', payload: { status: 'read', response: {} } })
+  page.props.linkedOrder = linkedOrder()
+  const html = await page.render()
+  assert.match(html, /href="\/orders\/73"/)
+  assert.match(html, /Order #5401/)
+  assert.match(html, /data-order-control="73" data-order-number="5401" data-website-name="Fixture website"/)
+  assert.match(html, />processing<\/button>/)
+  assert.match(html, /Submission: read/)
+  assert.ok(!html.includes('No linked order'))
+  assert.equal(page.props.entry.payment_status, 'paid')
+  assert.equal(page.props.entry.payload.status, 'read')
+  assert.equal(page.calls.posts.length, 0)
+})
+
+test('unlinked and read-only submissions cannot expose an enabled order status control', async (t) => {
+  const page = harness(t)
+  const unlinkedHtml = await page.render()
+  assert.ok(unlinkedHtml.includes('No linked order'))
+  assert.match(unlinkedHtml, /href="\/orders\?website_id=13"/)
+  assert.ok(!unlinkedHtml.includes('data-order-control'))
+  page.state.refreshLinkedOrder({ id: 73 })
+  assert.equal(page.calls.reloads.length, 0)
+  page.props.linkedOrder = linkedOrder({ can_update_status: false })
+  const readOnlyHtml = await page.render()
+  assert.match(readOnlyHtml, /data-order-control="73"[^>]* disabled/)
+  assert.ok(readOnlyHtml.includes('cannot change its status'))
+})
+
+test('settled order updates refresh only the linked order and entry without changing payment or retrying a write', async (t) => {
+  const page = harness(t, {}, { payment_status: 'paid' })
+  page.props.linkedOrder = linkedOrder()
+  await vue.nextTick()
+  page.state.refreshLinkedOrder({ id: 99 })
+  assert.equal(page.calls.reloads.length, 0)
+  page.state.refreshLinkedOrder({ id: 73 })
+  assert.equal(page.state.isRefreshingLinkedOrder.value, true)
+  const reload = page.calls.reloads[0]
+  assert.deepEqual(Array.from(reload.only), ['entry', 'linkedOrder'])
+  assert.equal(Object.hasOwn(reload, 'preserveScroll'), false)
+  assert.equal(Object.hasOwn(reload, 'preserveState'), false)
+  page.state.refreshLinkedOrder({ id: 73 })
+  assert.equal(page.calls.reloads.length, 1)
+  reload.onError()
+  assert.match(page.calls.errors[0], /Order details could not be refreshed/)
+  reload.onFinish()
+  assert.equal(page.state.isRefreshingLinkedOrder.value, false)
+  page.state.refreshLinkedOrder({ id: 73 })
+  const staleReload = page.calls.reloads[1]
+  page.props.entry.id = 99
+  page.props.linkedOrder = null
+  await vue.nextTick()
+  staleReload.onError()
+  staleReload.onFinish()
+  assert.equal(page.calls.errors.length, 1)
+  assert.equal(page.state.isRefreshingLinkedOrder.value, false)
+  assert.equal(page.props.entry.payment_status, 'paid')
+  assert.equal(page.calls.posts.length, 0)
 })

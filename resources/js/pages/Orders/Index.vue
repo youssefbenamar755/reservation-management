@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Badge } from '@/components/ui/badge';
+import OrderStatusControl from '@/components/OrderStatusControl.vue';
 import { Button } from '@/components/ui/button';
 import { useEchoNotifications } from '@/composables/useEchoNotifications';
 import { useToast } from '@/composables/useToast';
@@ -43,6 +43,7 @@ interface OrderRow {
     website_id: number;
     website: { id: number; name: string } | null;
     status: string;
+    can_update_status: boolean;
     total: string | number;
     currency: string | null;
     customer_name: string | null;
@@ -660,29 +661,6 @@ function decodeHtmlEntities(text: string): string {
         .replace(/&#x([0-9a-fA-F]+);/g, (_, n) =>
             String.fromCharCode(parseInt(n, 16)),
         );
-}
-
-function getStatusBadgeClass(status: string) {
-    const statusMap: Record<string, string> = {
-        completed:
-            'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-        processing:
-            'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-        pending:
-            'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-        cancelled: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-        refunded:
-            'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200',
-        'on-hold':
-            'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
-        failed: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200',
-        'checkout-draft':
-            'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-    };
-    return (
-        statusMap[status.toLowerCase()] ||
-        'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
-    );
 }
 
 function formatCurrency(amount: string | number, currency?: string | null) {
@@ -1314,13 +1292,17 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                                     >
                                 </td>
                                 <td class="px-3 py-4 align-top">
-                                    <Badge
-                                        class="border-0 px-2 py-1 text-[10px] font-medium"
-                                        :class="
-                                            getStatusBadgeClass(order.status)
+                                    <OrderStatusControl
+                                        :order-id="order.id"
+                                        :order-number="order.wp_order_id"
+                                        :status="order.status"
+                                        :website-name="order.website?.name"
+                                        :disabled="
+                                            filterLoading ||
+                                            !order.can_update_status
                                         "
-                                        >{{ statusName(order.status) }}</Badge
-                                    >
+                                        @settled="liveRefresh.requestFresh()"
+                                    />
                                 </td>
                                 <td class="px-3 py-4 text-right align-top">
                                     <strong
@@ -1371,13 +1353,18 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                                         :href="`/orders/${order.id}`"
                                         class="text-sm font-semibold hover:underline"
                                         >#{{ order.wp_order_id }}</Link
-                                    ><Badge
-                                        class="border-0 px-1.5 py-0.5 text-[10px] font-medium"
-                                        :class="
-                                            getStatusBadgeClass(order.status)
-                                        "
-                                        >{{ statusName(order.status) }}</Badge
                                     >
+                                    <OrderStatusControl
+                                        :order-id="order.id"
+                                        :order-number="order.wp_order_id"
+                                        :status="order.status"
+                                        :website-name="order.website?.name"
+                                        :disabled="
+                                            filterLoading ||
+                                            !order.can_update_status
+                                        "
+                                        @settled="liveRefresh.requestFresh()"
+                                    />
                                 </div>
                                 <p
                                     class="mt-2 truncate text-xs text-muted-foreground"

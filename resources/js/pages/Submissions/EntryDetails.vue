@@ -12,10 +12,20 @@ import { useToast } from '@/composables/useToast'
 import FlightCard from '@/components/FlightCard.vue'
 import EntryField from '@/components/submissions/EntryField.vue'
 import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue'
+import OrderStatusControl from '@/components/OrderStatusControl.vue'
 import { isPhoneField } from '@/lib/whatsapp'
+
+interface LinkedSubmissionOrder {
+  id: number
+  wp_order_id: number | string
+  status: string
+  website_name: string
+  can_update_status: boolean
+}
 
 const props = defineProps<{ 
   entry: any
+  linkedOrder?: LinkedSubmissionOrder | null
   formSchema?: {
     fields?: Record<string, { label: string; type: string }>
   } | null
@@ -37,6 +47,34 @@ const isGeneratingPnr = ref(false)
 const page = usePage()
 const lastProcessedFlash = ref<{ success?: string; error?: string }>({})
 const entryPdfs = ref<Array<{ passenger_name: string; url: string }>>([])
+const isRefreshingLinkedOrder = ref(false)
+let linkedOrderReload = 0
+
+watch(
+  () => [props.entry.id, props.linkedOrder?.id],
+  () => {
+    linkedOrderReload++
+    isRefreshingLinkedOrder.value = false
+  },
+)
+
+function refreshLinkedOrder(event: { id: number }) {
+  if (event.id !== props.linkedOrder?.id || isRefreshingLinkedOrder.value) return
+  const request = ++linkedOrderReload
+  isRefreshingLinkedOrder.value = true
+  // Inertia reload keeps the current component state and scroll position.
+  router.reload({
+    only: ['entry', 'linkedOrder'],
+    onError: () => {
+      if (request === linkedOrderReload) {
+        toast.error('Order details could not be refreshed. Open the order to check its latest status.')
+      }
+    },
+    onFinish: () => {
+      if (request === linkedOrderReload) isRefreshingLinkedOrder.value = false
+    },
+  })
+}
 
 watch(
   () => (page.props as any).flash?.success,
@@ -956,7 +994,7 @@ const technicalMetadata = computed(() => [
                             v-if="submissionMeta.status"
                             variant="secondary"
                             class="capitalize"
-                            >{{ submissionMeta.status }}</Badge
+                            >Submission: {{ submissionMeta.status }}</Badge
                         >
                         <Badge
                             variant="outline"
@@ -992,6 +1030,11 @@ const technicalMetadata = computed(() => [
                         href="#travel-details"
                         class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
                         >Travel details</a
+                    >
+                    <a
+                        href="#linked-order"
+                        class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >Linked order</a
                     >
                     <a
                         href="#booking-tools"
@@ -1317,8 +1360,60 @@ const technicalMetadata = computed(() => [
 
                 <aside
                     class="min-w-0 space-y-6"
-                    aria-label="Booking tools and submission information"
+                    aria-label="Linked order, booking tools and submission information"
                 >
+                    <Card
+                        id="linked-order"
+                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    >
+                        <CardHeader class="border-b border-border pb-4">
+                            <h2 class="text-base font-semibold">Linked order</h2>
+                            <CardDescription>WooCommerce order status</CardDescription>
+                        </CardHeader>
+                        <CardContent class="space-y-4 pt-4">
+                            <template v-if="linkedOrder">
+                                <div class="min-w-0 space-y-1">
+                                    <Link
+                                        :href="`/orders/${linkedOrder.id}`"
+                                        class="text-sm font-semibold underline underline-offset-4"
+                                        >Order #{{ linkedOrder.wp_order_id }}</Link
+                                    >
+                                    <p class="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                                        {{ linkedOrder.website_name }}
+                                    </p>
+                                </div>
+                                <OrderStatusControl
+                                    :key="linkedOrder.id"
+                                    :order-id="linkedOrder.id"
+                                    :order-number="linkedOrder.wp_order_id"
+                                    :status="linkedOrder.status"
+                                    :website-name="linkedOrder.website_name"
+                                    :disabled="!linkedOrder.can_update_status || isRefreshingLinkedOrder"
+                                    @settled="refreshLinkedOrder"
+                                />
+                                <p
+                                    v-if="isRefreshingLinkedOrder"
+                                    class="text-xs text-muted-foreground"
+                                    role="status"
+                                >Refreshing order details…</p>
+                                <p
+                                    v-else-if="!linkedOrder.can_update_status"
+                                    class="text-xs leading-relaxed text-muted-foreground"
+                                >You can view this order, but cannot change its status.</p>
+                            </template>
+                            <template v-else>
+                                <p class="text-sm font-medium">No linked order</p>
+                                <p class="text-xs leading-relaxed text-muted-foreground">
+                                    This submission has no linked WooCommerce order. Open Orders to find the order and change its status there.
+                                </p>
+                                <Link
+                                    :href="`/orders?website_id=${entry.website_id}`"
+                                    class="inline-flex text-sm font-medium underline underline-offset-4"
+                                    >View website orders</Link
+                                >
+                            </template>
+                        </CardContent>
+                    </Card>
                     <Card
                         id="booking-tools"
                         class="min-w-0 scroll-mt-6 gap-0 shadow-none"

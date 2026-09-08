@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\FfSubmission;
+use App\Models\WcOrder;
 use App\Models\Website;
 use App\Models\FfForm;
 use App\Services\AmadeusDummyTicketGeneratorService;
@@ -151,10 +152,51 @@ class FfSubmissionController extends Controller
 
         return Inertia::render('Submissions/EntryDetails', [
             'entry' => $entry->load('website'),
+            'linkedOrder' => fn () => $this->linkedOrder($entry),
             'formSchema' => $formSchema ? [
                 'fields' => $formSchema->fields,
             ] : null,
         ]);
+    }
+
+    private function linkedOrder(FfSubmission $entry): ?array
+    {
+        // WooCommerce's _fluent_id contains only an entry ID. If that ID was
+        // imported for more than one form, it cannot safely identify this entry.
+        if (FfSubmission::where('website_id', $entry->website_id)->where('entry_id', $entry->entry_id)
+            ->where('form_id', '!=', $entry->form_id)->exists()) {
+            return null;
+        }
+
+        $query = WcOrder::where('website_id', $entry->website_id);
+        if ($query->getConnection()->getDriverName() === 'sqlite') {
+            // SQLite does not support JSON_CONTAINS object subsets. Extract only
+            // object members from the metadata array, ignoring malformed members.
+            $meta = "CASE WHEN metadata.type = 'object' THEN metadata.value ELSE '{}' END";
+            $query->whereRaw("EXISTS (SELECT 1 FROM json_each(CASE WHEN json_type(payload, '$.meta_data') = 'array' THEN json_extract(payload, '$.meta_data') ELSE '[]' END) AS metadata WHERE json_extract({$meta}, '$.key') = ? AND json_type({$meta}, '$.value') IN ('integer', 'text') AND CAST(json_extract({$meta}, '$.value') AS TEXT) = ?)", ['_fluent_id', (string) $entry->entry_id]);
+        } else {
+            $query->where(fn ($match) => $match
+                ->whereJsonContains('payload->meta_data', [['key' => '_fluent_id', 'value' => (string) $entry->entry_id]])
+                ->orWhereJsonContains('payload->meta_data', [['key' => '_fluent_id', 'value' => (int) $entry->entry_id]]));
+        }
+
+        $matches = $query->limit(2)->get(['id', 'website_id', 'wp_order_id', 'status', 'payload->meta_data as order_metadata']);
+        if ($matches->count() !== 1) {
+            return null;
+        }
+        $order = $matches->first();
+        $metadata = json_decode($order->order_metadata ?? '[]', true);
+        $ids = collect(is_array($metadata) ? $metadata : [])->filter(fn ($meta) => is_array($meta) && ($meta['key'] ?? null) === '_fluent_id')
+            ->map(fn ($meta) => is_int($meta['value'] ?? null) || is_string($meta['value'] ?? null) ? (string) $meta['value'] : null)->unique();
+        if ($ids->count() !== 1 || $ids->first() !== (string) $entry->entry_id) {
+            return null;
+        }
+        $order->setRelation('website', $entry->website);
+
+        return [
+            'id' => $order->id, 'wp_order_id' => $order->wp_order_id, 'status' => $order->status,
+            'website_name' => $entry->website->name, 'can_update_status' => auth()->user()->can('update', $order),
+        ];
     }
 
     /**

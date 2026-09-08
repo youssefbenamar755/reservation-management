@@ -284,7 +284,6 @@ test('Orders supports every standard Woo status plus checkout draft and formats 
   const { state, props } = orders(t)
   assert.deepEqual(plain(state.statuses.map((status) => status.value)), ['pending', 'on-hold', 'processing', 'completed', 'cancelled', 'refunded', 'failed', 'checkout-draft'])
   assert.equal(state.statusName('on-hold'), 'On hold')
-  assert.match(state.getStatusBadgeClass('on-hold'), /orange/)
   assert.equal(state.statusName('checkout-draft'), 'Checkout draft')
   assert.equal(state.formatCurrency(0, 'eur'), '€0.00')
   assert.equal(state.formatCurrency('12.50', null), '12.5 UNKNOWN')
