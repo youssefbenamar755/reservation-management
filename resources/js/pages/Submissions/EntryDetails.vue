@@ -13,6 +13,7 @@ import FlightCard from '@/components/FlightCard.vue'
 import EntryField from '@/components/submissions/EntryField.vue'
 import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue'
 import OrderStatusControl from '@/components/OrderStatusControl.vue'
+import OrderEmailComposer from '@/components/OrderEmailComposer.vue'
 import { isPhoneField } from '@/lib/whatsapp'
 
 interface LinkedSubmissionOrder {
@@ -1368,7 +1369,7 @@ const technicalMetadata = computed(() => [
                     >
                         <CardHeader class="border-b border-border pb-4">
                             <h2 class="text-base font-semibold">Linked order</h2>
-                            <CardDescription>WooCommerce order status</CardDescription>
+                            <CardDescription>Order status and customer emails</CardDescription>
                         </CardHeader>
                         <CardContent class="space-y-4 pt-4">
                             <template v-if="linkedOrder">
@@ -1391,6 +1392,13 @@ const technicalMetadata = computed(() => [
                                     :disabled="!linkedOrder.can_update_status || isRefreshingLinkedOrder"
                                     @settled="refreshLinkedOrder"
                                 />
+                                <div v-if="linkedOrder.can_update_status" class="border-t pt-3">
+                                    <OrderEmailComposer
+                                        :key="`entry-email-${entry.id}-${linkedOrder.id}`"
+                                        :order-id="linkedOrder.id"
+                                        :order-number="linkedOrder.wp_order_id"
+                                    />
+                                </div>
                                 <p
                                     v-if="isRefreshingLinkedOrder"
                                     class="text-xs text-muted-foreground"
@@ -1399,12 +1407,12 @@ const technicalMetadata = computed(() => [
                                 <p
                                     v-else-if="!linkedOrder.can_update_status"
                                     class="text-xs leading-relaxed text-muted-foreground"
-                                >You can view this order, but cannot change its status.</p>
+                                >You can view this order, but cannot change its status or email documents.</p>
                             </template>
                             <template v-else>
                                 <p class="text-sm font-medium">No linked order</p>
                                 <p class="text-xs leading-relaxed text-muted-foreground">
-                                    This submission has no linked WooCommerce order. Open Orders to find the order and change its status there.
+                                    This submission has no linked WooCommerce order. Open Orders to find the order, update its status, or email documents.
                                 </p>
                                 <Link
                                     :href="`/orders?website_id=${entry.website_id}`"
