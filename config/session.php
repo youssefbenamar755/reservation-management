@@ -199,7 +199,9 @@ return [
     |
     */
 
-    'same_site' => env('SESSION_SAME_SITE', 'strict'),
+    // Google's top-level OAuth callback must carry the authenticated session.
+    // Lax still excludes cross-site unsafe requests; Laravel also validates CSRF tokens.
+    'same_site' => env('SESSION_SAME_SITE', 'lax'),
 
     /*
     |--------------------------------------------------------------------------

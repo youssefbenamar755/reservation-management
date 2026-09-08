@@ -220,7 +220,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 - **Session Encryption**: Changed to `true` (encrypt session data in database)
 - **Secure Cookie**: Auto-enabled in production
 - **HTTP Only**: Forced to `true` (JavaScript cannot access)
-- **SameSite**: Upgraded to `strict` (prevents CSRF)
+- **SameSite**: `lax` permits the top-level Google OAuth callback while excluding cross-site unsafe requests. Laravel CSRF validation and one-time OAuth state checks remain enabled.
 
 **Files Modified:**
 - `config/session.php`
@@ -231,7 +231,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 'encrypt' => true,          // Was: false
 'secure' => app()->environment('production'), // Was: env only
 'http_only' => true,        // Removed env override
-'same_site' => 'strict',    // Was: 'lax'
+'same_site' => 'lax',       // OAuth callback requires the authenticated session
 ```
 
 ---
@@ -264,7 +264,7 @@ SESSION_LIFETIME=120
 SESSION_EXPIRE_ON_CLOSE=true
 SESSION_ENCRYPT=true
 SESSION_SECURE_COOKIE=true
-SESSION_SAME_SITE=strict
+SESSION_SAME_SITE=lax
 
 # Ensure HTTPS is configured on your web server
 APP_URL=https://yourdomain.com
