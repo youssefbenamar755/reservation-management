@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderEmailController extends Controller
 {
-    public function options(Request $request, WcOrder $order, OrderEmailComposer $composer)
+    public function context(Request $request, WcOrder $order, OrderEmailComposer $composer)
     {
         $this->authorize('view', $order);
 
@@ -25,6 +25,7 @@ class OrderEmailController extends Controller
             'recipient' => ['required', 'string', 'email:rfc', 'max:254', 'not_regex:/[\r\n\x00]/'],
             'subject' => ['required', 'string', 'max:255', 'not_regex:/[\r\n\x00]/'],
             'body' => ['required', 'string', 'max:20000'],
+            'track_opens' => ['sometimes', 'boolean'],
             'files' => ['required', 'array', 'min:1', 'max:5'],
             'files.*' => ['required', 'file', 'mimetypes:application/pdf', 'max:5120'],
             'sender' => ['prohibited'], 'sender_email' => ['prohibited'], 'from' => ['prohibited'],

@@ -60,7 +60,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/customers/{email}', [CustomersController::class, 'show'])->name('customers.show');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
-    Route::get('/orders/{order}/email', [OrderEmailController::class, 'options'])->name('orders.email.options');
+    Route::get('/orders/{order}/email', [OrderEmailController::class, 'context'])->name('orders.email.context');
     Route::post('/orders/{order}/email/preview', [OrderEmailController::class, 'preview'])->middleware('throttle:10,1')->name('orders.email.preview');
     Route::get('/orders/{order}/email/{delivery}', [OrderEmailController::class, 'show'])->name('orders.email.show');
     Route::post('/orders/{order}/email/{delivery}/send', [OrderEmailController::class, 'send'])->middleware('throttle:6,1')->name('orders.email.send');

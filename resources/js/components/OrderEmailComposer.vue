@@ -11,6 +11,8 @@ import {
 import type {
     EmailDelivery,
     EmailDeliveryStatus,
+    EmailHistory,
+    EmailOpenTracking,
     EmailPreview,
     OrderEmailContext,
 } from '@/types/email';
@@ -30,7 +32,12 @@ import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
 const props = defineProps<{ orderId: number; orderNumber?: string | number }>();
 const open = ref(false);
 const context = shallowRef<OrderEmailContext | null>(null);
-const draft = reactive({ recipient: '', subject: '', body: '' });
+const draft = reactive({
+    recipient: '',
+    subject: '',
+    body: '',
+    trackOpens: false,
+});
 const files = shallowRef<File[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 const preview = shallowRef<EmailPreview | null>(null);
@@ -75,10 +82,16 @@ const configured = computed(() =>
 const currentStatus = computed(
     () => delivery.value?.status ?? preview.value?.status ?? null,
 );
+const currentTracking = computed(
+    () => delivery.value?.tracking ?? preview.value?.tracking ?? null,
+);
+const trackingCaveat =
+    'Tracking detects image loads. Privacy tools and views in your Sent folder can trigger it; blocked images can hide opens. It does not prove the email was read or a PDF was opened.';
 const canSend = computed(
     () =>
         !busy.value &&
         !sendUnconfirmed.value &&
+        step.value === 'preview' &&
         Boolean(preview.value) &&
         ['prepared', 'failed'].includes(currentStatus.value ?? ''),
 );
@@ -116,6 +129,37 @@ function isSender(value: unknown): boolean {
         typeof sender.name === 'string',
     );
 }
+function readTracking(value: unknown): EmailOpenTracking {
+    if (value === undefined)
+        return { enabled: false, first_open_detected_at: null };
+    const data = value as EmailOpenTracking | null;
+    if (
+        !data ||
+        typeof data.enabled !== 'boolean' ||
+        (data.first_open_detected_at !== null &&
+            (typeof data.first_open_detected_at !== 'string' ||
+                !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+                    data.first_open_detected_at,
+                ) ||
+                !Number.isFinite(Date.parse(data.first_open_detected_at)))) ||
+        (!data.enabled && data.first_open_detected_at !== null)
+    )
+        throw new Error('Invalid email tracking');
+    return {
+        enabled: data.enabled,
+        first_open_detected_at: data.first_open_detected_at,
+    };
+}
+function trackingLabel(
+    tracking: EmailOpenTracking,
+    status: EmailDeliveryStatus | null,
+): string {
+    if (!tracking.enabled) return 'Tracking off';
+    if (tracking.first_open_detected_at) return 'Open detected';
+    return status === 'sent' || status === 'uncertain'
+        ? 'No open detected yet'
+        : 'Tracking on';
+}
 function readPreview(value: unknown): EmailPreview {
     const data = value as EmailPreview | null;
     if (
@@ -140,7 +184,7 @@ function readPreview(value: unknown): EmailPreview {
     ) {
         throw new Error('Invalid email preview');
     }
-    return data;
+    return { ...data, tracking: readTracking(data.tracking) };
 }
 function readDelivery(value: unknown, id: string): EmailDelivery {
     const data = value as EmailDelivery | null;
@@ -152,7 +196,18 @@ function readDelivery(value: unknown, id: string): EmailDelivery {
         (data.sent_at !== null && typeof data.sent_at !== 'string')
     )
         throw new Error('Invalid email status');
-    return data;
+    return { ...data, tracking: readTracking(data.tracking) };
+}
+function readHistory(value: unknown): EmailHistory {
+    const data = value as EmailHistory | null;
+    if (!data || typeof data.created_at !== 'string')
+        throw new Error('Invalid email history');
+    const saved = readPreview({ ...data, body: '' });
+    return {
+        ...data,
+        ...readDelivery(data, saved.id),
+        created_at: data.created_at,
+    };
 }
 function invalidate() {
     generation++;
@@ -220,6 +275,7 @@ async function loadContext() {
             )
         )
             throw new Error('Invalid email settings');
+        const history = data.history.map(readHistory);
         if (!active(token, id)) return;
         if (!context.value)
             Object.assign(draft, {
@@ -227,7 +283,7 @@ async function loadContext() {
                 subject: data.subject,
                 body: data.body,
             });
-        context.value = data;
+        context.value = { ...data, history };
     } catch (exception) {
         if (active(token, id))
             error.value = failure(
@@ -242,7 +298,18 @@ function setOpen(value: boolean) {
     if (sending.value) return;
     open.value = value;
     if (value) {
-        void loadContext();
+        const contextRequest = loadContext();
+        const token = generation,
+            id = props.orderId;
+        void contextRequest.then(() => {
+            if (
+                active(token, id) &&
+                !error.value &&
+                step.value === 'preview' &&
+                preview.value
+            )
+                void viewDelivery(preview.value.id);
+        });
     } else {
         invalidate();
         dragging.value = false;
@@ -316,6 +383,7 @@ async function preparePreview() {
     form.append('recipient', draft.recipient.trim());
     form.append('subject', draft.subject);
     form.append('body', draft.body);
+    form.append('track_opens', draft.trackOpens ? '1' : '0');
     files.value.forEach((file) => form.append('files[]', file, file.name));
     try {
         const { data } = await axios.post(`/orders/${id}/email/preview`, form, {
@@ -391,6 +459,7 @@ async function sendEmail() {
             status: 'expired',
             message: '',
             sent_at: null,
+            tracking: preview.value.tracking,
         };
         return;
     }
@@ -445,7 +514,12 @@ watch(
         preview.value = null;
         delivery.value = null;
         files.value = [];
-        Object.assign(draft, { recipient: '', subject: '', body: '' });
+        Object.assign(draft, {
+            recipient: '',
+            subject: '',
+            body: '',
+            trackOpens: false,
+        });
         step.value = 'compose';
         sendUnconfirmed.value = false;
         if (open.value) void loadContext();
@@ -759,6 +833,32 @@ onUnmounted(() => {
                             {{ message }}
                         </p>
                     </section>
+                    <div class="space-y-2 rounded-lg border bg-muted/20 p-3">
+                        <label
+                            for="order-email-track-opens"
+                            class="flex cursor-pointer items-center gap-2.5 text-sm font-medium"
+                        >
+                            <input
+                                id="order-email-track-opens"
+                                v-model="draft.trackOpens"
+                                type="checkbox"
+                                class="size-4 rounded border accent-primary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="busy"
+                                aria-describedby="order-email-tracking-help"
+                            />
+                            Track opens
+                            <span
+                                class="text-xs font-normal text-muted-foreground"
+                                >Optional</span
+                            >
+                        </label>
+                        <p
+                            id="order-email-tracking-help"
+                            class="text-xs leading-relaxed text-muted-foreground"
+                        >
+                            {{ trackingCaveat }}
+                        </p>
+                    </div>
                     <DialogFooter class="gap-2 border-t pt-4"
                         ><Button
                             type="button"
@@ -800,6 +900,26 @@ onUnmounted(() => {
                                     {{ item.recipient }} · {{ item.status }} ·
                                     {{ formatTime(item.created_at) }}
                                 </p>
+                                <p class="mt-1 text-xs text-muted-foreground">
+                                    {{
+                                        trackingLabel(
+                                            item.tracking,
+                                            item.status,
+                                        )
+                                    }}<template
+                                        v-if="
+                                            item.tracking.first_open_detected_at
+                                        "
+                                    >
+                                        ·
+                                        {{
+                                            formatTime(
+                                                item.tracking
+                                                    .first_open_detected_at,
+                                            )
+                                        }}</template
+                                    >
+                                </p>
                             </div>
                             <Button
                                 size="sm"
@@ -834,6 +954,29 @@ onUnmounted(() => {
                         {{ formatTime(delivery.sent_at) }}
                     </p>
                 </div>
+                <div
+                    v-if="
+                        currentTracking?.enabled &&
+                        (currentTracking.first_open_detected_at ||
+                            ['sent', 'uncertain'].includes(currentStatus ?? ''))
+                    "
+                    class="space-y-1 rounded-lg border bg-muted/20 p-3 text-sm"
+                    role="status"
+                >
+                    <p class="font-medium">
+                        {{ trackingLabel(currentTracking, currentStatus) }}
+                    </p>
+                    <p
+                        v-if="currentTracking.first_open_detected_at"
+                        class="text-xs text-muted-foreground"
+                    >
+                        First detected
+                        {{ formatTime(currentTracking.first_open_detected_at) }}
+                    </p>
+                    <p class="text-xs leading-relaxed text-muted-foreground">
+                        {{ trackingCaveat }}
+                    </p>
+                </div>
                 <section
                     class="min-w-0 overflow-hidden rounded-xl border"
                     aria-label="Saved email preview"
@@ -855,6 +998,27 @@ onUnmounted(() => {
                             <dt class="text-muted-foreground">Subject</dt>
                             <dd class="font-semibold break-words">
                                 {{ preview.subject }}
+                            </dd>
+                        </div>
+                        <div class="grid gap-1 sm:grid-cols-[70px_1fr]">
+                            <dt class="text-muted-foreground">Tracking</dt>
+                            <dd>
+                                {{
+                                    preview.tracking.enabled
+                                        ? 'Tracking on'
+                                        : 'Tracking off'
+                                }}
+                                <p
+                                    v-if="
+                                        preview.tracking.enabled &&
+                                        !['sent', 'uncertain'].includes(
+                                            currentStatus ?? '',
+                                        )
+                                    "
+                                    class="mt-1 text-xs leading-relaxed text-muted-foreground"
+                                >
+                                    {{ trackingCaveat }}
+                                </p>
                             </dd>
                         </div>
                     </dl>
@@ -892,8 +1056,9 @@ onUnmounted(() => {
                     </div>
                 </section>
                 <p class="text-xs text-muted-foreground">
-                    Preview expires {{ formatTime(preview.expires_at) }}. Only
-                    the message and attachments shown above will be sent.
+                    Preview expires {{ formatTime(preview.expires_at) }}. The
+                    saved message, PDFs, and tracking choice shown above will be
+                    used.
                 </p>
                 <DialogFooter class="flex-wrap gap-2 border-t pt-4"
                     ><Button

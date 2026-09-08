@@ -14,6 +14,10 @@ export interface EmailAttachment {
     name: string;
     size: number;
 }
+export interface EmailOpenTracking {
+    enabled: boolean;
+    first_open_detected_at: string | null;
+}
 export interface EmailPreview {
     id: string;
     recipient: string;
@@ -23,12 +27,14 @@ export interface EmailPreview {
     attachments: EmailAttachment[];
     expires_at: string;
     status: EmailDeliveryStatus;
+    tracking: EmailOpenTracking;
 }
 export interface EmailDelivery {
     id: string;
     status: EmailDeliveryStatus;
     message: string;
     sent_at: string | null;
+    tracking: EmailOpenTracking;
 }
 export interface EmailHistory extends EmailDelivery {
     recipient: string;

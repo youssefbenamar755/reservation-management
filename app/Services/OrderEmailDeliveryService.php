@@ -77,6 +77,7 @@ class OrderEmailDeliveryService
             ]);
         }
 
-        return $current;
+        // A mail client may request the image while Gmail is completing the send.
+        return $current->refresh();
     }
 }

@@ -94,6 +94,10 @@ class OrderEmailComposer
             $contents[] = $bytes;
         }
         $snapshot = ['recipient' => $values['recipient'], 'sender' => $sender, 'subject' => $values['subject'], 'body' => $values['body'], 'attachments' => $attachments];
+        // Keep the existing fingerprint for untracked messages, including older previews.
+        if ((bool) ($values['track_opens'] ?? false)) {
+            $snapshot['track_opens'] = true;
+        }
         $fingerprint = hash('sha256', json_encode([$actor->id, $order->id, $connection->connection_key, $snapshot], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
 
         // One order lock serializes duplicate preparations, including a just-expired preview.
@@ -113,6 +117,14 @@ class OrderEmailComposer
             $id = (string) Str::uuid();
             $message = (new Email)->from(new Address($snapshot['sender']['email'], $snapshot['sender']['name']))
                 ->to($snapshot['recipient'])->subject($snapshot['subject'])->text($snapshot['body']);
+            $trackingToken = null;
+            if ($snapshot['track_opens'] ?? false) {
+                $trackingToken = bin2hex(random_bytes(32));
+                // Use the configured application origin, never an incoming Host header.
+                $pixelUrl = rtrim((string) config('app.url'), '/').route('emails.opens.show', ['token' => $trackingToken], absolute: false);
+                $body = nl2br(htmlspecialchars($snapshot['body'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false);
+                $message->html('<!doctype html><html><body><div>'.$body.'</div><img src="'.htmlspecialchars($pixelUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').'" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0"></body></html>');
+            }
             $message->getHeaders()->addIdHeader('Message-ID', $id.'@wphub.website');
             foreach ($snapshot['attachments'] as $index => $file) {
                 $message->attach($contents[$index], $file['name'], 'application/pdf');
@@ -123,6 +135,8 @@ class OrderEmailComposer
                 'gmail_connection_id' => $connection->id, 'connection_key' => $connection->connection_key,
                 'fingerprint' => $fingerprint, 'deduplication_key' => $fingerprint, 'snapshot' => $snapshot, 'mime' => $message->toString(),
                 'status' => 'prepared', 'result_message' => 'Review the saved email, then confirm Send.', 'expires_at' => now()->addDay(),
+                'tracking_enabled' => $trackingToken !== null,
+                'tracking_token_hash' => $trackingToken !== null ? hash('sha256', $trackingToken) : null,
             ]);
         }, 3);
     }
@@ -177,7 +191,7 @@ class OrderEmailComposer
         (clone $scope)->where('status', 'uncertain')->where('expires_at', '<', now())->whereNotNull('mime')->update(['mime' => null]);
 
         return $scope
-            ->select('id', 'snapshot', 'status', 'result_message', 'expires_at', 'sending_at', 'sent_at', 'created_at')
+            ->select('id', 'snapshot', 'status', 'result_message', 'expires_at', 'sending_at', 'sent_at', 'created_at', 'tracking_enabled', 'first_open_detected_at')
             ->orderByDesc('created_at')->orderByDesc('id')->limit(10)->get()->map(function ($delivery) {
                 $preview = $delivery->preview();
                 unset($preview['body']);
