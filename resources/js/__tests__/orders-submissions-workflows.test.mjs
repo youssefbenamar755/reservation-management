@@ -75,7 +75,7 @@ function harness(t, path, initialFilters = {}, options = {}) {
     post(url, data, options) { const request = { url, data, options, ...deferred() }; calls.posts.push(request); return request.promise },
   }
   const props = vue.reactive({
-    orders: { data: [{ id: 1 }], links: [] }, filters: initialFilters,
+    orders: { data: [{ id: 1 }], links: [], ...(options.timezone ? { timezone: options.timezone } : {}) }, filters: initialFilters,
     forms: { data: [], links: [] }, websites: [{ id: 1, name: 'Site A' }, { id: 2, name: 'Site B' }],
     entries: { data: [], links: [] }, website: { id: 2, name: 'Site B' }, formId: 88, formName: 'Booking form',
   })
@@ -85,11 +85,15 @@ function harness(t, path, initialFilters = {}, options = {}) {
     '@inertiajs/vue3': { router, usePage: () => page },
     '@/composables/useToast': { useToast: () => ({ success: (text) => calls.successes.push(text), error: (text) => calls.errors.push(text) }) },
     '@/composables/useEchoNotifications': { useEchoNotifications: () => ({ onNotification() {}, offNotification() {} }) },
-    ...(!options.realLive ? { '@/lib/liveOrders': { createAutoRefresh: () => ({ start() {}, stop() {}, suspend() {}, resume() {}, request() {}, availabilityChanged() {} }) } } : {}),
+    ...(!options.realLive ? { '@/lib/liveOrders': { createAutoRefresh: () => ({ start() {}, stop() {}, suspend() {}, resume() {}, request() {}, requestFresh() {}, availabilityChanged() {} }) } } : {}),
     '@/lib/ordersPush': { subscribeToOrders: (subscription) => { calls.subscriptions.push(subscription); return () => {} } },
   }
   const globals = {
     console, AbortController, URL, URLSearchParams, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout, queueMicrotask,
+    Date: options.now ? class extends Date {
+      constructor(...args) { if (args.length) super(...args); else super(options.now) }
+      static now() { return new Date(options.now).getTime() }
+    } : Date,
     window: { ...windowEvents, location: { href: 'https://example.test/orders', origin: 'https://example.test' } },
     document: { ...documentEvents, hidden: false }, navigator: { onLine: true },
     fetch(url, options) { const request = { url, options, ...deferred() }; calls.snapshots.push(request); return request.promise },
@@ -103,7 +107,7 @@ function harness(t, path, initialFilters = {}, options = {}) {
     runInNewContext(outputText, {
       ...globals, module, exports: module.exports,
       require: (name) => Object.hasOwn(mocks, name) ? mocks[name]
-        : ['@/lib/fluentFormsSync', '@/lib/liveOrders'].includes(name) ? load(`${name.slice(2)}.ts`)
+        : ['@/lib/fluentFormsSync', '@/lib/liveOrders', '@/lib/orderPeriod'].includes(name) ? load(`${name.slice(2)}.ts`)
           : name.startsWith('@/') ? {} : require(name),
     })
     return module.exports
@@ -118,6 +122,7 @@ function harness(t, path, initialFilters = {}, options = {}) {
     mount: () => mounted.forEach((callback) => callback()),
     confirm: (value) => { confirmation = value },
     helpers: () => load('lib/fluentFormsSync.ts'),
+    periodHelpers: () => load('lib/orderPeriod.ts'),
     async complete(call, filters) {
       props.filters = filters; page.url = `/orders?${new URLSearchParams(filters)}`; globals.window.location.href = `https://example.test${page.url}`; await vue.nextTick()
       call.options.onSuccess?.(); call.options.onFinish?.(); routerEvents.emit('finish', { detail: { visit: call.visit } })
@@ -224,6 +229,138 @@ test('Orders date validation retains invalid drafts, then recovers in one correc
   assert.equal(app.state.filterInputs.value.start_date, '2026-09-08')
   assert.deepEqual(plain(app.state.filterErrors.value), { start_date: 'Server rejected the date.' })
   assert.equal(app.state.filterLoading.value, false)
+})
+
+test('Orders period presets use inclusive calendar dates across month, year, leap-day and timezone boundaries', async (t) => {
+  const cases = [
+    { preset: 'today', now: '2026-09-08T12:00:00Z', timezone: 'UTC', start: '2026-09-08', end: '2026-09-08' },
+    { preset: '7d', now: '2026-01-02T00:30:00Z', timezone: 'UTC', start: '2025-12-27', end: '2026-01-02' },
+    { preset: '30d', now: '2024-03-01T12:00:00Z', timezone: 'UTC', start: '2024-02-01', end: '2024-03-01' },
+    { preset: '30d', now: '2023-03-01T12:00:00Z', timezone: 'UTC', start: '2023-01-31', end: '2023-03-01' },
+    { preset: 'month', now: '2026-06-15T12:00:00Z', timezone: 'UTC', start: '2026-06-01', end: '2026-06-15' },
+    { preset: 'today', now: '2026-01-01T00:30:00Z', timezone: 'America/Los_Angeles', start: '2025-12-31', end: '2025-12-31' },
+    { preset: 'month', now: '2026-01-31T12:30:00Z', timezone: 'Pacific/Kiritimati', start: '2026-02-01', end: '2026-02-01' },
+    { preset: '7d', now: '2026-11-02T05:30:00Z', timezone: 'America/New_York', start: '2026-10-27', end: '2026-11-02' },
+  ]
+  for (const item of cases) {
+    await t.test(`${item.preset}: ${item.now} in ${item.timezone}`, (t) => {
+      const app = orders(t, {}, { now: item.now, timezone: item.timezone })
+      app.state.applyPeriod(item.preset, new Date(item.now))
+      assert.equal(app.calls.gets.length, 1)
+      assert.deepEqual(plain(app.calls.gets[0].params), {
+        website_id: '', status: '', search: '', start_date: item.start, end_date: item.end, sort: 'newest', per_page: '15',
+      })
+      assert.equal(app.state.filterInputs.value.start_date, item.start)
+      assert.equal(app.state.filterInputs.value.end_date, item.end)
+      app.timers.advance(1000)
+      assert.equal(app.calls.gets.length, 1)
+    })
+  }
+})
+
+test('Orders period presets replace both dates atomically and preserve the latest search and unrelated filters', (t) => {
+  const app = orders(t, { website_id: 2, status: 'completed', search: 'Original', start_date: '2026-08-01', end_date: '2026-08-31', sort: 'highest', per_page: 100 }, { now: '2026-09-08T12:00:00Z', timezone: 'UTC' })
+  app.state.updateSearch('Latest customer')
+  app.state.applyPeriod('today')
+  assert.equal(app.calls.gets.length, 1)
+  assert.deepEqual(plain(app.calls.gets[0].params), { website_id: '2', status: 'completed', search: 'Latest customer', start_date: '2026-09-08', end_date: '2026-09-08', sort: 'highest', per_page: '100' })
+  assert.deepEqual(plain(app.state.filterErrors.value), {})
+  assert.equal(app.state.filterLoading.value, true)
+  assert.equal(app.state.showCustomDates.value, false)
+  app.timers.advance(1000)
+  assert.equal(app.calls.gets.length, 1)
+  app.state.applyPeriod('7d')
+  assert.equal(app.calls.gets.length, 2)
+  assert.equal(app.calls.gets[0].cancelled, true)
+  assert.equal(app.calls.gets[1].params.start_date, '2026-09-02')
+  assert.equal(app.calls.gets[1].params.end_date, '2026-09-08')
+  assert.equal(app.calls.gets[1].params.search, 'Latest customer')
+  app.state.applyPeriod('7d')
+  app.timers.advance(1000)
+  assert.equal(app.calls.gets.length, 2)
+})
+
+test('Orders All time clears only dates, cancels pending work and keeps the summary label applied until success', async (t) => {
+  const initial = { website_id: 2, status: 'on-hold', search: 'Ada', start_date: '2026-09-01', end_date: '2026-09-07', sort: 'lowest', per_page: 50 }
+  const app = orders(t, initial, { now: '2026-09-08T12:00:00Z' })
+  assert.equal(app.state.periodLabel.value, 'Sep 1, 2026 – Sep 7, 2026')
+  app.state.updateFilter('sort', 'oldest')
+  const previous = app.calls.gets[0]
+  app.state.updateSearch('Latest Ada')
+  app.state.applyPeriod('all')
+  assert.equal(previous.cancelled, true)
+  assert.equal(app.calls.gets.length, 2)
+  assert.deepEqual(plain(app.calls.gets[1].params), { website_id: '2', status: 'on-hold', search: 'Latest Ada', start_date: '', end_date: '', sort: 'oldest', per_page: '50' })
+  assert.equal(app.state.periodLabel.value, 'Sep 1, 2026 – Sep 7, 2026')
+  assert.equal(app.state.activePeriod.value, 'all')
+  app.timers.advance(1000)
+  assert.equal(app.calls.gets.length, 2)
+  await app.complete(app.calls.gets[1], { ...initial, search: 'Latest Ada', sort: 'oldest', start_date: null, end_date: null })
+  assert.equal(app.state.periodLabel.value, 'All time')
+  assert.equal(app.state.filterLoading.value, false)
+  app.state.applyPeriod('all')
+  assert.equal(app.calls.gets.length, 2)
+})
+
+test('Orders preset highlighting follows draft dates and custom input validation without relabeling applied totals', async (t) => {
+  const app = orders(t, {}, { now: '2026-09-08T12:00:00Z', timezone: 'UTC' })
+  assert.equal(app.state.showCustomDates.value, false)
+  assert.equal(app.state.activePeriod.value, 'all')
+  for (const preset of ['today', '7d', '30d', 'month']) {
+    app.state.applyPeriod(preset)
+    assert.equal(app.state.activePeriod.value, preset)
+    assert.equal(app.state.periodLabel.value, 'All time')
+  }
+  app.state.showCustomDates.value = true
+  app.state.updateFilter('start_date', '2026-09-03')
+  assert.equal(app.state.activePeriod.value, 'custom')
+  const beforeInvalid = app.calls.gets.length
+  app.state.updateFilter('end_date', '2026-09-01')
+  assert.equal(app.calls.gets.length, beforeInvalid)
+  assert.match(app.state.filterErrors.value.end_date, /on or after/)
+  assert.equal(app.state.filterInputs.value.end_date, '2026-09-01')
+  assert.equal(app.state.periodLabel.value, 'All time')
+  app.state.applyPeriod('7d')
+  assert.equal(app.calls.gets.length, beforeInvalid + 1)
+  assert.deepEqual(plain(app.state.filterErrors.value), {})
+  assert.equal(app.state.activePeriod.value, '7d')
+  await app.complete(app.calls.gets.at(-1), { start_date: '2026-09-02', end_date: '2026-09-08' })
+  assert.equal(app.state.periodLabel.value, 'Sep 2, 2026 – Sep 8, 2026')
+})
+
+test('Orders period labels retain applied dates after errors and follow successful responses and browser history', async (t) => {
+  const app = orders(t, { start_date: '2026-09-01', end_date: '2026-09-07' }, { now: '2026-09-08T12:00:00Z' })
+  app.mount()
+  assert.equal(app.state.showCustomDates.value, true)
+  assert.equal(app.state.activePeriod.value, 'custom')
+  app.state.applyPeriod('today')
+  const failed = app.calls.gets[0]
+  failed.options.onError({ start_date: 'Date range unavailable.' }); failed.options.onFinish()
+  assert.equal(app.state.periodLabel.value, 'Sep 1, 2026 – Sep 7, 2026')
+  assert.equal(app.state.filterInputs.value.start_date, '2026-09-08')
+  app.state.applyPeriod('30d')
+  await app.complete(app.calls.gets[1], { start_date: '2026-08-10', end_date: '2026-09-08' })
+  assert.equal(app.state.periodLabel.value, 'Aug 10, 2026 – Sep 8, 2026')
+  app.windowEvents.emit('popstate')
+  app.props.filters = { start_date: '2025-12-31', end_date: '2025-12-31', status: 'completed' }
+  app.page.url = '/orders?start_date=2025-12-31&end_date=2025-12-31&status=completed'
+  await flush()
+  assert.equal(app.state.periodLabel.value, 'Dec 31, 2025')
+  assert.equal(app.state.activePeriod.value, 'custom')
+  assert.equal(app.state.filterInputs.value.start_date, '2025-12-31')
+  assert.equal(app.state.filterInputs.value.end_date, '2025-12-31')
+  assert.equal(app.state.filterInputs.value.status, 'completed')
+})
+
+test('Orders applied period labels distinguish all time, complete days, ranges and one-sided scopes', (t) => {
+  const app = orders(t)
+  const { orderPeriodLabel } = app.periodHelpers()
+  assert.equal(orderPeriodLabel(), 'All time')
+  assert.equal(orderPeriodLabel('', null), 'All time')
+  assert.equal(orderPeriodLabel('2026-09-08', '2026-09-08'), 'Sep 8, 2026')
+  assert.equal(orderPeriodLabel('2026-09-01', '2026-09-08'), 'Sep 1, 2026 – Sep 8, 2026')
+  assert.equal(orderPeriodLabel('2026-09-01'), 'From Sep 1, 2026')
+  assert.equal(orderPeriodLabel(null, '2026-09-08'), 'Through Sep 8, 2026')
 })
 
 test('Orders pagination keeps the applied date/sort/page-size scope and cancels an unsent search', (t) => {

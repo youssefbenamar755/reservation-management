@@ -11,6 +11,11 @@ import {
     type AutoRefreshState,
 } from '@/lib/liveOrders';
 import {
+    orderPeriodLabel,
+    orderPeriodRange,
+    type OrderPeriod,
+} from '@/lib/orderPeriod';
+import {
     subscribeToOrders,
     type OrdersConnectionState,
 } from '@/lib/ordersPush';
@@ -23,6 +28,7 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowUpRight,
+    CalendarDays,
     CheckCircle2,
     ChevronLeft,
     ChevronRight,
@@ -31,7 +37,6 @@ import {
     RefreshCw,
     Search,
     ShoppingBag,
-    SlidersHorizontal,
     Wallet,
     X,
 } from 'lucide-vue-next';
@@ -93,9 +98,40 @@ const breadcrumbs: BreadcrumbItem[] = [
 const filterInputs = ref(readAppliedFilters());
 const filterLoading = ref(false);
 const filterErrors = ref<Record<string, string>>({});
-const showMoreFilters = ref(
+const showCustomDates = ref(
     Boolean(props.filters.start_date || props.filters.end_date),
 );
+const periods: Array<{ value: OrderPeriod; label: string }> = [
+    { value: 'all', label: 'All time' },
+    { value: 'today', label: 'Today' },
+    { value: '7d', label: '7 days' },
+    { value: '30d', label: '30 days' },
+    { value: 'month', label: 'This month' },
+];
+const activePeriod = computed(
+    () =>
+        periods.find(({ value }) => {
+            const range = orderPeriodRange(
+                value,
+                props.orders.timezone || 'UTC',
+            );
+            return (
+                range.start_date === filterInputs.value.start_date &&
+                range.end_date === filterInputs.value.end_date
+            );
+        })?.value ?? 'custom',
+);
+const periodLabel = computed(() =>
+    orderPeriodLabel(props.filters.start_date, props.filters.end_date),
+);
+function applyPeriod(period: OrderPeriod, now = new Date()) {
+    Object.assign(
+        filterInputs.value,
+        orderPeriodRange(period, props.orders.timezone || 'UTC', now),
+    );
+    showCustomDates.value = false;
+    submitFilters();
+}
 const statuses = [
     { value: 'pending', label: 'Pending payment' },
     { value: 'on-hold', label: 'On hold' },
@@ -778,6 +814,121 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                     >
                 </div>
             </div>
+            <section class="orders-panel p-4 sm:p-5" aria-label="Order period">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2 text-sm font-medium">
+                        <CalendarDays
+                            class="size-4 text-muted-foreground"
+                            aria-hidden="true"
+                        />
+                        Order period
+                    </div>
+                    <div
+                        class="flex flex-wrap items-center gap-1.5"
+                        role="group"
+                        aria-label="Choose order period"
+                    >
+                        <Button
+                            v-for="period in periods"
+                            :key="period.value"
+                            size="sm"
+                            :variant="
+                                activePeriod === period.value
+                                    ? 'default'
+                                    : 'outline'
+                            "
+                            :aria-pressed="activePeriod === period.value"
+                            @click="applyPeriod(period.value)"
+                            >{{ period.label }}</Button
+                        >
+                        <Button
+                            size="sm"
+                            :variant="
+                                activePeriod === 'custom'
+                                    ? 'default'
+                                    : 'outline'
+                            "
+                            :aria-expanded="showCustomDates"
+                            aria-controls="order-date-filters"
+                            @click="showCustomDates = !showCustomDates"
+                            >Custom range</Button
+                        >
+                    </div>
+                </div>
+                <p class="mt-3 text-xs text-muted-foreground" role="status">
+                    <span class="font-medium text-foreground">{{
+                        periodLabel
+                    }}</span>
+                    · {{ orders.timezone || 'UTC' }} · Applies to totals and the
+                    orders table.
+                    <span v-if="filterLoading" class="ml-1"
+                        >Updating results…</span
+                    >
+                </p>
+                <div
+                    v-show="showCustomDates"
+                    id="order-date-filters"
+                    class="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-[1fr_1fr_1.3fr]"
+                >
+                    <div>
+                        <label
+                            for="orders-from"
+                            class="mb-1.5 block text-xs text-muted-foreground"
+                            >From date</label
+                        ><input
+                            id="orders-from"
+                            type="date"
+                            class="orders-input w-full"
+                            :value="filterInputs.start_date"
+                            :aria-invalid="Boolean(filterErrors.start_date)"
+                            @change="
+                                updateFilter(
+                                    'start_date',
+                                    ($event.target as HTMLInputElement).value,
+                                )
+                            "
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="orders-to"
+                            class="mb-1.5 block text-xs text-muted-foreground"
+                            >To date</label
+                        ><input
+                            id="orders-to"
+                            type="date"
+                            class="orders-input w-full"
+                            :value="filterInputs.end_date"
+                            :aria-invalid="Boolean(filterErrors.end_date)"
+                            @change="
+                                updateFilter(
+                                    'end_date',
+                                    ($event.target as HTMLInputElement).value,
+                                )
+                            "
+                        />
+                    </div>
+                    <p
+                        class="self-end pb-1 text-[11px] leading-relaxed text-muted-foreground"
+                    >
+                        Dates include the full selected days in
+                        {{ orders.timezone || 'UTC' }}. Totals reflect all
+                        active filters.
+                    </p>
+                </div>
+                <div
+                    v-if="filterErrors.start_date || filterErrors.end_date"
+                    class="mt-3 rounded-lg bg-destructive/5 p-3 text-xs text-destructive"
+                    role="alert"
+                >
+                    <p v-if="filterErrors.start_date">
+                        {{ filterErrors.start_date }}
+                    </p>
+                    <p v-if="filterErrors.end_date">
+                        {{ filterErrors.end_date }}
+                    </p>
+                </div>
+            </section>
             <section
                 aria-label="Matching order totals"
                 class="grid grid-cols-2 gap-3 xl:grid-cols-4"
@@ -799,7 +950,7 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                         >{{ orders.total.toLocaleString() }}</strong
                     >
                     <p class="mt-2 text-[11px] text-muted-foreground">
-                        Across all matching pages
+                        {{ periodLabel }} · all matching pages
                     </p>
                 </article>
                 <article class="orders-metric">
@@ -960,20 +1111,7 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                     class="mt-3 flex flex-wrap items-center justify-between gap-3"
                 >
                     <div class="flex items-center gap-2">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            class="-ml-2 text-muted-foreground"
-                            :aria-expanded="showMoreFilters"
-                            aria-controls="order-date-filters"
-                            @click="showMoreFilters = !showMoreFilters"
-                            ><SlidersHorizontal
-                                class="size-3.5"
-                                aria-hidden="true" />Date range<span
-                                v-if="filters.start_date || filters.end_date"
-                                class="size-1.5 rounded-full bg-primary"
-                                aria-hidden="true" /></Button
-                        ><button
+                        <button
                             v-if="
                                 hasFilters || Object.keys(filterErrors).length
                             "
@@ -1007,57 +1145,6 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                         </select>
                     </div>
                 </div>
-                <div
-                    v-show="showMoreFilters"
-                    id="order-date-filters"
-                    class="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-[1fr_1fr_1.3fr]"
-                >
-                    <div>
-                        <label
-                            for="orders-from"
-                            class="mb-1.5 block text-xs text-muted-foreground"
-                            >From date</label
-                        ><input
-                            id="orders-from"
-                            type="date"
-                            class="orders-input w-full"
-                            :value="filterInputs.start_date"
-                            :aria-invalid="Boolean(filterErrors.start_date)"
-                            @change="
-                                updateFilter(
-                                    'start_date',
-                                    ($event.target as HTMLInputElement).value,
-                                )
-                            "
-                        />
-                    </div>
-                    <div>
-                        <label
-                            for="orders-to"
-                            class="mb-1.5 block text-xs text-muted-foreground"
-                            >To date</label
-                        ><input
-                            id="orders-to"
-                            type="date"
-                            class="orders-input w-full"
-                            :value="filterInputs.end_date"
-                            :aria-invalid="Boolean(filterErrors.end_date)"
-                            @change="
-                                updateFilter(
-                                    'end_date',
-                                    ($event.target as HTMLInputElement).value,
-                                )
-                            "
-                        />
-                    </div>
-                    <p
-                        class="self-end pb-1 text-[11px] leading-relaxed text-muted-foreground"
-                    >
-                        Dates include the full selected days in
-                        {{ orders.timezone || 'UTC' }}. Totals reflect all
-                        active filters.
-                    </p>
-                </div>
                 <p
                     v-if="
                         filterInputs.sort === 'highest' ||
@@ -1069,13 +1156,25 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                     conversion.
                 </p>
                 <div
-                    v-if="Object.keys(filterErrors).length"
+                    v-if="
+                        Object.keys(filterErrors).some(
+                            (key) => !['start_date', 'end_date'].includes(key),
+                        )
+                    "
                     class="mt-3 rounded-lg bg-destructive/5 p-3 text-xs text-destructive"
                     role="alert"
                 >
-                    <p v-for="(error, key) in filterErrors" :key="key">
-                        {{ error }}
-                    </p>
+                    <template v-for="(error, key) in filterErrors" :key="key">
+                        <p
+                            v-if="
+                                !['start_date', 'end_date'].includes(
+                                    String(key),
+                                )
+                            "
+                        >
+                            {{ error }}
+                        </p>
+                    </template>
                 </div>
                 <div
                     v-if="filterChips.length"
