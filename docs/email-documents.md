@@ -22,6 +22,16 @@ Google controls consent and verification requirements. An external OAuth app lef
 
 Only the saved, immutable preview is sent. Requests cannot override the From address or attachments at send time. Identical content is protected against duplicate preparation/sending. No timer polls Gmail and no automatic send retry runs.
 
+## Optional open tracking
+
+Enable **Track opens** before preparing an email to add a tiny remote image to that message. Tracking is off by default. The preview confirms the saved choice; changing it requires preparing a new preview. Earlier emails and messages sent with tracking off remain untracked.
+
+The order's email history shows **Open detected** and the first detected time when an image request reaches WP Hub after sending starts. This is an estimate of an image load, not proof that the customer read the email. Blocked images or plain-text email can prevent detection. Mail privacy services, security scanners, forwarded copies, and viewing your own message in Gmail Sent can trigger detection. Gmail or other image proxies may cache the image, so repeat opens are not counted. An open detection never changes an uncertain send into `Sent` and does not establish delivery. Attached PDF opens are not tracked.
+
+Tracked messages retain their plain-text body and original PDF attachments, with an additional HTML version that escapes the message text. The image URL contains a random secret token, stored only inside the encrypted MIME until that MIME is removed. The database retains its SHA-256 hash, an enabled flag, and the first detection time; these contain no IP address, user agent, or per-open event history. Preview and history responses expose only the enabled flag and timestamp, never the token or image URL.
+
+The public `/api/email/opens/{token}.gif` endpoint is stateless and sets no session cookies. It returns the same small, uncached image for valid and invalid tokens; `HEAD` does not record an open. A first valid GET uses one indexed, conditional database update, without polling, background jobs, or additional Gmail permissions. Detection metadata survives attachment pruning and is retained with the delivery record. There is no separate expiry for sent-message tracking links. Deleting the delivery (including through its parent order, website, user, or Gmail connection) removes its tracking record. Infrastructure may retain ordinary HTTP access logs under its existing logging configuration; the application does not add recipient request logs.
+
 ## Storage and operations
 
 Prepared messages and uploaded attachments are encrypted in a bounded database snapshot, so pending uploads do not depend on an individual Laravel Cloud instance's filesystem. Preview attachments expire after 24 hours; successfully sent attachment snapshots are removed immediately. Metadata remains in the order's email history. The daily `emails:prune-previews` command clears expired attachment snapshots. Keep the existing Laravel scheduler enabled.

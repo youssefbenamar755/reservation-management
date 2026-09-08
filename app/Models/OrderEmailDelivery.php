@@ -12,12 +12,13 @@ class OrderEmailDelivery extends Model
 
     protected $guarded = [];
 
-    protected $hidden = ['snapshot', 'mime', 'fingerprint', 'deduplication_key', 'connection_key', 'gmail_message_id'];
+    protected $hidden = ['snapshot', 'mime', 'fingerprint', 'deduplication_key', 'connection_key', 'gmail_message_id', 'tracking_token_hash'];
 
     protected $casts = [
         'snapshot' => 'encrypted:array', 'mime' => 'encrypted',
         'expires_at' => 'datetime', 'sending_at' => 'datetime', 'sent_at' => 'datetime',
         'send_attempts' => 'integer',
+        'tracking_enabled' => 'boolean', 'first_open_detected_at' => 'datetime',
     ];
 
     public function order(): BelongsTo
@@ -44,11 +45,17 @@ class OrderEmailDelivery extends Model
             'subject' => $snapshot['subject'], 'body' => $snapshot['body'],
             'attachments' => array_map(fn ($file) => ['name' => $file['name'], 'size' => $file['size']], $snapshot['attachments']),
             'expires_at' => $this->expires_at->toIso8601String(), 'status' => $this->status,
+            'tracking' => $this->tracking(),
         ];
     }
 
     public function outcome(): array
     {
-        return ['id' => $this->id, 'status' => $this->status, 'message' => $this->result_message, 'sent_at' => $this->sent_at?->toIso8601String()];
+        return ['id' => $this->id, 'status' => $this->status, 'message' => $this->result_message, 'sent_at' => $this->sent_at?->toIso8601String(), 'tracking' => $this->tracking()];
+    }
+
+    private function tracking(): array
+    {
+        return ['enabled' => (bool) $this->tracking_enabled, 'first_open_detected_at' => $this->first_open_detected_at?->toIso8601String()];
     }
 }
