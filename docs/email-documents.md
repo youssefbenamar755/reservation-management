@@ -29,3 +29,9 @@ Prepared messages and uploaded attachments are encrypted in a bounded database s
 Changing Google application credentials or disconnecting/reconnecting a mailbox invalidates old previews. Changing the website's sender requires a new preview. Credentials and file contents must not be included in diagnostic logs.
 
 Validation uses fake Google HTTP responses and synthetic customer PDFs. Do not use real customer email delivery as a deployment smoke test.
+
+## Connection troubleshooting
+
+If Google consent returns to WP Hub's login page, verify `SESSION_SAME_SITE=lax` in the deployment's effective session configuration. `Strict` blocks the session on Google's top-level cross-site GET callback. With the cookie session driver, both the session identifier cookie and its payload cookie must be Lax; changing only one cookie is insufficient. Keep `SESSION_SECURE_COOKIE=true` on HTTPS, HttpOnly enabled, and the existing session driver.
+
+After updating deployment configuration and rebuilding its configuration cache, open WP Hub, sign in if needed, then start **Connect Gmail** again so the browser receives fresh cookies and a new one-time OAuth state. Do not reuse an old callback URL. Authentication, CSRF protection, the ten-minute state lifetime, and PKCE remain required. See the [browser's SameSite cookie rules](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie#samesitesamesite-value).

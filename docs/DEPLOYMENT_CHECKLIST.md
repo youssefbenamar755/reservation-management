@@ -43,7 +43,7 @@ SESSION_LIFETIME=120
 SESSION_EXPIRE_ON_CLOSE=true
 SESSION_ENCRYPT=true
 SESSION_SECURE_COOKIE=true
-SESSION_SAME_SITE=strict
+SESSION_SAME_SITE=lax
 ```
 
 ---
@@ -170,13 +170,15 @@ tail -f storage/logs/laravel.log | grep -i webhook
 ```bash
 php artisan tinker
 >>> config('session.same_site')
-// Should return: "strict"
+// Should return: "lax" so Google OAuth can return with the authenticated session.
 ```
 
-2. **Temporarily revert same_site to 'lax':**
+2. **Use Lax for the Google OAuth callback:**
 ```env
 SESSION_SAME_SITE=lax
 ```
+
+`Strict` prevents session cookies from accompanying Google's cross-site callback and can send the user back to login. Keep Secure and HttpOnly enabled; Laravel CSRF checks and the callback's one-time OAuth state validation remain required.
 
 3. **Clear config cache:**
 ```bash
