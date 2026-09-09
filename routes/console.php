@@ -27,3 +27,10 @@ Schedule::command(SyncWooCommerceOrders::class)
     ->appendOutputTo(storage_path('logs/woo-sync.log'));
 
 Schedule::command(PruneOrderEmailPreviews::class)->daily()->withoutOverlapping(10);
+
+// Cloud's scheduler drains this dedicated queue without a permanently running worker.
+// max-time is checked between jobs; retry_after exceeds the individual job timeout.
+Schedule::command('queue:work traffic --queue=traffic --stop-when-empty --max-jobs=4 --max-time=50 --timeout=180 --tries=1 --sleep=1')
+    ->everyMinute()->withoutOverlapping(6)->runInBackground();
+
+Schedule::command(\App\Console\Commands\TrafficPruneReports::class)->daily()->withoutOverlapping(5);

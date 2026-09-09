@@ -36,6 +36,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Email',
         href: '/settings/email',
     },
+    {
+        title: 'Traffic & SEO',
+        href: '/settings/traffic',
+    },
     // Only show User Management and Updates for admin users
     ...(user.is_admin
         ? [

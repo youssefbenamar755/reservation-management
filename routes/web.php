@@ -12,6 +12,7 @@ use App\Http\Controllers\CustomersController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\WebhookHealthController;
 use App\Http\Controllers\OrderEmailController;
+use App\Http\Controllers\TrafficController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -51,6 +52,10 @@ Route::middleware(['auth'])->group(function () {
 });
 Route::middleware(['auth'])->group(function () {
     Route::get('/website-health', [WebhookHealthController::class, 'index'])->name('website-health.index');
+    Route::get('/traffic', [TrafficController::class, 'index'])->name('traffic.index');
+    Route::post('/traffic/refresh', [TrafficController::class, 'refresh'])->middleware('throttle:6,1,traffic-refresh')->name('traffic.refresh');
+    Route::get('/traffic/status', [TrafficController::class, 'status'])->middleware('throttle:30,1,traffic-status')->name('traffic.status');
+    Route::get('/traffic/realtime', [TrafficController::class, 'realtime'])->middleware('throttle:6,1,traffic-realtime')->name('traffic.realtime');
     Route::get('/website-health/events/{event}', [WebhookHealthController::class, 'show'])->name('website-health.events.show');
     Route::post('/website-health/events/{event}/retry', [WebhookHealthController::class, 'retry'])
         ->middleware('throttle:6,1')->name('website-health.events.retry');
