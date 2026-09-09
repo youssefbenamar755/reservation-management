@@ -160,9 +160,30 @@ test('traffic Search Console distinguishes an empty successful response from mal
     }
 })->with(['empty', 'empty-object', 'malformed', 'failed']);
 
-test('traffic realtime requests only last thirty minutes with no dimensions', function () {
-    Http::fake(['analyticsdata.googleapis.com/*' => Http::response(trafficGaRow([], ['activeUsers'], [], [14]))]);
+test('traffic realtime uses the default last thirty minutes and validates nonzero active users', function () {
+    Http::fake(['analyticsdata.googleapis.com/*' => Http::response(trafficGaRow([], ['activeUsers'], [], [14], ['kind' => 'analyticsData#runRealtimeReport']))]);
     expect($this->reports->realtime($this->connection, '123456'))->toBe(14);
     Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/123456:runRealtimeReport')
-        && $request['minuteRanges'] === [['startMinutesAgo' => 29, 'endMinutesAgo' => 0]] && $request['metrics'] === [['name' => 'activeUsers']]);
+        && ! array_key_exists('minuteRanges', $request->data()) && ! array_key_exists('dimensions', $request->data())
+        && $request['metrics'] === [['name' => 'activeUsers']] && $request['limit'] === '1');
 });
+
+test('traffic realtime accepts the observed Google kind-only no-activity response as zero', function () {
+    // Exact sanitized response observed from the live Google API; no metric headers or rows.
+    Http::fake(['analyticsdata.googleapis.com/*' => Http::response(['kind' => 'analyticsData#runRealtimeReport'])]);
+    expect($this->reports->realtime($this->connection, '123456'))->toBe(0);
+    Http::assertSentCount(1);
+});
+
+test('traffic realtime does not mistake malformed nonempty or error responses for zero activity', function (array $response) {
+    Http::fake(['analyticsdata.googleapis.com/*' => Http::response($response)]);
+    expect(fn () => $this->reports->realtime($this->connection, '123456'))->toThrow(RuntimeException::class);
+})->with([
+    'wrong resource' => [['kind' => 'analyticsData#runReport']],
+    'missing kind' => [trafficGaRow([], ['activeUsers'], [], [14])],
+    'unexpected dateRange header' => [trafficGaRow(['dateRange'], ['activeUsers'], ['date_range_0'], [14], ['kind' => 'analyticsData#runRealtimeReport'])],
+    'missing metric header' => [['kind' => 'analyticsData#runRealtimeReport', 'rows' => [['metricValues' => [['value' => '14']]]]]],
+    'error envelope' => [['kind' => 'analyticsData#runRealtimeReport', 'error' => ['message' => 'private provider error']]],
+    'error alongside data' => [trafficGaRow([], ['activeUsers'], [], [14], ['kind' => 'analyticsData#runRealtimeReport', 'error' => ['message' => 'private provider error']])],
+    'claimed missing rows' => [['kind' => 'analyticsData#runRealtimeReport', 'rowCount' => 1]],
+]);

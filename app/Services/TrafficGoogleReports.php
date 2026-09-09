@@ -194,8 +194,16 @@ class TrafficGoogleReports
     public function realtime(TrafficConnection $connection, string $property): int
     {
         $report = $this->google->post($connection, "https://analyticsdata.googleapis.com/v1beta/properties/{$property}:runRealtimeReport", [
-            'metrics' => [['name' => 'activeUsers']], 'minuteRanges' => [['startMinutesAgo' => 29, 'endMinutesAgo' => 0]], 'limit' => '1',
+            // Google's omitted minuteRanges default is the last 30 minutes.
+            'metrics' => [['name' => 'activeUsers']], 'limit' => '1',
         ]);
+        if (($report['kind'] ?? null) !== 'analyticsData#runRealtimeReport' || array_key_exists('error', $report)) {
+            throw new RuntimeException('Invalid realtime Analytics report.');
+        }
+        // Google returns this exact envelope, without headers or rows, for no activity.
+        if ($report === ['kind' => 'analyticsData#runRealtimeReport']) {
+            return 0;
+        }
         $rows = $this->gaRows($report, [], ['activeUsers'], 1);
 
         return (int) ($rows[0]['activeUsers'] ?? 0);
