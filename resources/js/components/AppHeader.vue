@@ -2,6 +2,7 @@
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
+import NotificationBell from '@/components/NotificationBell.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,12 +30,22 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import UserMenuContent from '@/components/UserMenuContent.vue';
-import NotificationBell from '@/components/NotificationBell.vue';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, FileText, Folder, Globe, LayoutGrid, Menu, Search, ShoppingCart, TrendingUp } from 'lucide-vue-next';
+import {
+    BookOpen,
+    FileText,
+    Folder,
+    Globe,
+    LayoutGrid,
+    Menu,
+    Search,
+    ShoppingCart,
+    Target,
+    TrendingUp,
+} from 'lucide-vue-next';
 import { computed } from 'vue';
 
 interface Props {
@@ -75,6 +86,11 @@ const mainNavItems: NavItem[] = [
         title: 'Traffic & SEO',
         href: '/traffic',
         icon: Search,
+    },
+    {
+        title: 'SEO opportunities',
+        href: '/seo',
+        icon: Target,
     },
     {
         title: 'Websites',
