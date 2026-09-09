@@ -21,6 +21,7 @@ import {
     Globe,
     LayoutGrid,
     ShoppingCart,
+    Target,
     TrendingUp,
     Users,
 } from 'lucide-vue-next';
@@ -41,6 +42,11 @@ const mainNavItems: NavItem[] = [
         title: 'Traffic & SEO',
         href: '/traffic',
         icon: Activity,
+    },
+    {
+        title: 'SEO opportunities',
+        href: '/seo',
+        icon: Target,
     },
     {
         title: 'Websites',

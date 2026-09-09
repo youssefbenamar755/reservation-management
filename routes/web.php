@@ -13,6 +13,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\WebhookHealthController;
 use App\Http\Controllers\OrderEmailController;
 use App\Http\Controllers\TrafficController;
+use App\Http\Controllers\SeoController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -56,6 +57,11 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/traffic/refresh', [TrafficController::class, 'refresh'])->middleware('throttle:6,1,traffic-refresh')->name('traffic.refresh');
     Route::get('/traffic/status', [TrafficController::class, 'status'])->middleware('throttle:30,1,traffic-status')->name('traffic.status');
     Route::get('/traffic/realtime', [TrafficController::class, 'realtime'])->middleware('throttle:6,1,traffic-realtime')->name('traffic.realtime');
+    Route::get('/seo', [SeoController::class, 'index'])->name('seo.index');
+    Route::post('/seo/refresh', [SeoController::class, 'refresh'])->middleware('throttle:6,1,seo-refresh')->name('seo.refresh');
+    Route::get('/seo/status', [SeoController::class, 'status'])->middleware('throttle:30,1,seo-status')->name('seo.status');
+    Route::get('/seo/page', [SeoController::class, 'detail'])->middleware('throttle:30,1,seo-page')->name('seo.page');
+    Route::post('/seo/page/refresh', [SeoController::class, 'refreshPage'])->middleware('throttle:6,1,seo-page-refresh')->name('seo.page.refresh');
     Route::get('/website-health/events/{event}', [WebhookHealthController::class, 'show'])->name('website-health.events.show');
     Route::post('/website-health/events/{event}/retry', [WebhookHealthController::class, 'retry'])
         ->middleware('throttle:6,1')->name('website-health.events.retry');
