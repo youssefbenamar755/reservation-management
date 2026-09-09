@@ -72,6 +72,11 @@ const mainNavItems: NavItem[] = [
         icon: TrendingUp,
     },
     {
+        title: 'Traffic & SEO',
+        href: '/traffic',
+        icon: Search,
+    },
+    {
         title: 'Websites',
         href: '/websites',
         icon: Globe,

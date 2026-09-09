@@ -48,8 +48,8 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
 
         // Referrer Policy
-        $response->headers->set('Referrer-Policy', $request->routeIs('email-settings.callback') ? 'no-referrer' : 'strict-origin-when-cross-origin');
-        if ($request->routeIs('email-settings.callback')) {
+        $response->headers->set('Referrer-Policy', $request->routeIs('email-settings.callback', 'traffic-settings.callback') ? 'no-referrer' : 'strict-origin-when-cross-origin');
+        if ($request->routeIs('email-settings.callback', 'traffic-settings.callback')) {
             $response->headers->set('Cache-Control', 'private, no-store');
         }
 
