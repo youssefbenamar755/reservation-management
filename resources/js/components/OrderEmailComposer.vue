@@ -29,7 +29,17 @@ import {
 } from 'lucide-vue-next';
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
 
-const props = defineProps<{ orderId: number; orderNumber?: string | number }>();
+const props = defineProps<{
+    orderId: number;
+    orderNumber?: string | number;
+    hideTrigger?: boolean;
+}>();
+const emit = defineEmits<{
+    settled: [
+        event: { orderId: number; action: 'preview' | 'send' | 'status' },
+    ];
+    closed: [event: { orderId: number }];
+}>();
 const open = ref(false);
 const context = shallowRef<OrderEmailContext | null>(null);
 const draft = reactive({
@@ -294,8 +304,8 @@ async function loadContext() {
         if (active(token, id)) loading.value = false;
     }
 }
-function setOpen(value: boolean) {
-    if (sending.value) return;
+function setOpen(value: boolean, reviewLatest = false) {
+    if (sending.value || disposed || open.value === value) return;
     open.value = value;
     if (value) {
         const contextRequest = loadContext();
@@ -305,14 +315,17 @@ function setOpen(value: boolean) {
             if (
                 active(token, id) &&
                 !error.value &&
-                step.value === 'preview' &&
-                preview.value
-            )
-                void viewDelivery(preview.value.id);
+                ((step.value === 'preview' && preview.value) ||
+                    (reviewLatest && context.value?.history.length))
+            ) {
+                const id = preview.value?.id ?? context.value?.history[0]?.id;
+                if (id) void viewDelivery(id);
+            }
         });
     } else {
         invalidate();
         dragging.value = false;
+        emit('closed', { orderId: props.orderId });
     }
 }
 function addFiles(incoming: File[]) {
@@ -406,7 +419,10 @@ async function preparePreview() {
             );
         }
     } finally {
-        if (active(token, id)) preparing.value = false;
+        if (active(token, id)) {
+            preparing.value = false;
+            emit('settled', { orderId: id, action: 'preview' });
+        }
     }
 }
 function editDraft() {
@@ -448,7 +464,10 @@ async function viewDelivery(id: string) {
                 'The email status could not be refreshed. No email was sent by this check.',
             );
     } finally {
-        if (active(token, orderId)) checking.value = false;
+        if (active(token, orderId)) {
+            checking.value = false;
+            emit('settled', { orderId, action: 'status' });
+        }
     }
 }
 async function sendEmail() {
@@ -492,7 +511,10 @@ async function sendEmail() {
             );
         }
     } finally {
-        if (active(token, orderId)) sending.value = false;
+        if (active(token, orderId)) {
+            sending.value = false;
+            emit('settled', { orderId, action: 'send' });
+        }
     }
 }
 function formatBytes(size: number) {
@@ -530,10 +552,36 @@ onUnmounted(() => {
     invalidate();
     sendRequest?.abort();
 });
+defineExpose({
+    open: (reviewLatest = false) => setOpen(true, reviewLatest),
+    getState: () => ({
+        open: open.value,
+        sending: sending.value,
+        hasDraft:
+            sending.value ||
+            sendUnconfirmed.value ||
+            preparing.value ||
+            ((currentStatus.value !== 'sent' || step.value === 'compose') &&
+                Boolean(
+                    preview.value ||
+                    files.value.length ||
+                    draft.trackOpens ||
+                    (context.value &&
+                        (draft.recipient !== context.value.recipient ||
+                            draft.subject !== context.value.subject ||
+                            draft.body !== context.value.body)),
+                )),
+    }),
+});
 </script>
 
 <template>
-    <Button type="button" variant="outline" size="sm" @click="setOpen(true)"
+    <Button
+        v-if="!hideTrigger"
+        type="button"
+        variant="outline"
+        size="sm"
+        @click="setOpen(true)"
         ><Mail class="size-4" />Email documents</Button
     >
     <Dialog :open="open" @update:open="setOpen">

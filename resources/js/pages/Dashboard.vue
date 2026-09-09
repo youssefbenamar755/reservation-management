@@ -567,6 +567,17 @@ function statusDot(status: string): string {
                         <p class="mt-0.5 text-xs text-muted-foreground">
                             Current backlog · {{ scopeName }} · all dates
                         </p>
+                        <Link
+                            :href="
+                                filters.website_id
+                                    ? `/order-work-queue?website_id=${filters.website_id}`
+                                    : '/order-work-queue'
+                            "
+                            class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        >
+                            Open work queue
+                            <ChevronRight class="size-3" aria-hidden="true" />
+                        </Link>
                     </div>
                 </div>
                 <div class="grid grid-cols-3 divide-x">

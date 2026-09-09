@@ -84,6 +84,7 @@ const validationFailure = (errors) => ({
 function harness(t) {
     const calls = [];
     const hooks = {};
+    const events = [];
     const props = vue.reactive({ orderId: 10, orderNumber: 1001 });
     const request = (method, url, data, options) =>
         new Promise((resolve, reject) =>
@@ -118,7 +119,14 @@ function harness(t) {
     });
     const scope = vue.effectScope();
     const state = scope.run(() =>
-        module.exports.default.setup(props, { expose() {} }),
+        module.exports.default.setup(props, {
+            expose(value) {
+                hooks.exposed = value;
+            },
+            emit(name, value) {
+                events.push({ name, value });
+            },
+        }),
     );
     t.after(() => {
         hooks.unmount();
@@ -136,8 +144,58 @@ function harness(t) {
         respond(calls.length - 1, { preview: data });
         await pending;
     };
-    return { state, props, calls, hooks, respond, open, prepare };
+    return { state, props, calls, hooks, events, respond, open, prepare };
 }
+
+test('queue can open the latest saved email explicitly without sending and receives scoped settlement and close events', async (t) => {
+    const { hooks, state, calls, respond, events } = harness(t);
+    assert.equal(hooks.exposed.getState().hasDraft, false);
+    hooks.exposed.open(true);
+    respond(0, context({ history: [history('uncertain')] }));
+    await flush();
+    assert.equal(calls[1].url, `/orders/10/email/${uuid}`);
+    respond(1, {
+        preview: saved({ status: 'uncertain' }),
+        delivery: result('uncertain'),
+    });
+    await flush();
+    assert.equal(calls.filter((call) => call.method === 'POST').length, 0);
+    assert.equal(state.currentStatus.value, 'uncertain');
+    assert.equal(events[0].name, 'settled');
+    assert.equal(events[0].value.orderId, 10);
+    assert.equal(events[0].value.action, 'status');
+    state.setOpen(false);
+    assert.equal(events.at(-1).name, 'closed');
+    assert.equal(hooks.exposed.getState().hasDraft, true);
+});
+
+test('queue draft protection includes a revised draft after a completed send and settlement fires only for current requests', async (t) => {
+    const { state, hooks, events, props, calls, open, prepare, respond } =
+        harness(t);
+    await open();
+    assert.equal(hooks.exposed.getState().hasDraft, false);
+    await prepare();
+    assert.equal(events.at(-1).value.action, 'preview');
+    const sending = state.sendEmail();
+    assert.equal(hooks.exposed.getState().sending, true);
+    state.setOpen(false);
+    assert.equal(state.open.value, true);
+    respond(calls.length - 1, { delivery: result('sent') });
+    await sending;
+    assert.equal(events.at(-1).value.action, 'send');
+    assert.equal(hooks.exposed.getState().hasDraft, false);
+    state.editDraft();
+    state.draft.body = 'A corrected document is attached.';
+    assert.equal(hooks.exposed.getState().hasDraft, true);
+    const before = events.length;
+    const action = state.preparePreview(),
+        index = calls.length - 1;
+    props.orderId = 20;
+    await flush();
+    respond(index, { preview: saved() });
+    await action;
+    assert.equal(events.length, before);
+});
 
 test('composer loads only when opened and refreshes settings without replacing retained draft/files', async (t) => {
     const { state, calls, open, respond } = harness(t);

@@ -36,6 +36,7 @@ import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
 import {
     BookOpen,
+    ClipboardList,
     FileText,
     Folder,
     Globe,
@@ -101,6 +102,11 @@ const mainNavItems: NavItem[] = [
         title: 'Orders',
         href: '/orders',
         icon: ShoppingCart,
+    },
+    {
+        title: 'Order work queue',
+        href: '/order-work-queue',
+        icon: ClipboardList,
     },
     {
         title: 'Submissions',

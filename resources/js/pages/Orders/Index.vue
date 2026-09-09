@@ -754,6 +754,18 @@ function formatDate(dateString: string | null, part: 'date' | 'time' = 'date') {
                     </p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" as-child>
+                        <Link
+                            :href="
+                                props.filters.website_id
+                                    ? `/order-work-queue?website_id=${props.filters.website_id}`
+                                    : '/order-work-queue'
+                            "
+                        >
+                            Work queue
+                            <ArrowUpRight class="size-3.5" aria-hidden="true" />
+                        </Link>
+                    </Button>
                     <Button
                         variant="outline"
                         size="sm"
