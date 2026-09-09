@@ -16,6 +16,7 @@ import { Link } from '@inertiajs/vue3';
 import {
     Activity,
     BookOpen,
+    ClipboardList,
     FileText,
     Folder,
     Globe,
@@ -62,6 +63,11 @@ const mainNavItems: NavItem[] = [
         title: 'Orders',
         href: '/orders',
         icon: ShoppingCart,
+    },
+    {
+        title: 'Order work queue',
+        href: '/order-work-queue',
+        icon: ClipboardList,
     },
     {
         title: 'Customers',

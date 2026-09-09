@@ -14,6 +14,7 @@ use App\Http\Controllers\WebhookHealthController;
 use App\Http\Controllers\OrderEmailController;
 use App\Http\Controllers\TrafficController;
 use App\Http\Controllers\SeoController;
+use App\Http\Controllers\OrderWorkQueueController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -70,6 +71,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/customers/export', [CustomersController::class, 'export'])->name('customers.export');
     Route::get('/customers/{email}', [CustomersController::class, 'show'])->name('customers.show');
     Route::get('/orders', [WcOrderController::class, 'index'])->name('orders.index');
+    Route::get('/order-work-queue', [OrderWorkQueueController::class, 'index'])->name('order-work-queue.index');
     Route::get('/orders/{order}', [WcOrderController::class, 'show'])->name('orders.show');
     Route::get('/orders/{order}/email', [OrderEmailController::class, 'context'])->name('orders.email.context');
     Route::post('/orders/{order}/email/preview', [OrderEmailController::class, 'preview'])->middleware('throttle:10,1')->name('orders.email.preview');
