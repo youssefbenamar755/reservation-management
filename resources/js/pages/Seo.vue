@@ -1108,7 +1108,7 @@ onUnmounted(() => {
                     class="flex flex-col items-center px-6 py-14 text-center"
                 >
                     <LoaderCircle
-                        v-if="refreshing || waiting"
+                        v-if="refreshing || waiting || seoPending(reports)"
                         class="mb-4 size-8 animate-spin text-indigo-500"
                     /><Search
                         v-else
@@ -1116,10 +1116,10 @@ onUnmounted(() => {
                     />
                     <h3 class="font-semibold">
                         {{
-                            search || category !== 'all'
-                                ? 'No opportunities match these filters'
-                                : refreshing || waiting
-                                  ? 'Preparing your analysis'
+                            refreshing || waiting || seoPending(reports)
+                                ? 'Preparing your analysis'
+                                : search || category !== 'all'
+                                  ? 'No opportunities match these filters'
                                   : readyCount
                                     ? 'No review rules matched'
                                     : 'No analysis available yet'
@@ -1129,11 +1129,15 @@ onUnmounted(() => {
                         class="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground"
                     >
                         {{
-                            search || category !== 'all'
-                                ? 'Try another search or view all categories.'
-                                : readyCount
-                                  ? 'The returned Search Console rows did not meet these thresholds. This does not mean every page or query has been assessed.'
-                                  : 'Connect a Search Console property for each website, then refresh the analysis. Website status below explains any missing results.'
+                            refreshing || waiting || seoPending(reports)
+                                ? 'Current and previous period comparisons are being prepared. Results will appear as analyses finish; use Refresh analysis to check again if needed.'
+                                : search || category !== 'all'
+                                  ? 'Try another search or view all categories.'
+                                  : readyCount
+                                    ? 'The returned Search Console rows did not meet these thresholds. This does not mean every page or query has been assessed.'
+                                    : seo.connection.connected && anyMapped
+                                      ? 'Use Refresh analysis to request results. Check the website coverage below for any issues that need attention.'
+                                      : 'Connect a Search Console property for each website, then refresh the analysis. Website status below explains any missing results.'
                         }}
                     </p>
                     <Button
