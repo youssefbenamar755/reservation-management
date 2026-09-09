@@ -15,6 +15,7 @@ use App\Http\Controllers\OrderEmailController;
 use App\Http\Controllers\TrafficController;
 use App\Http\Controllers\SeoController;
 use App\Http\Controllers\OrderWorkQueueController;
+use App\Http\Controllers\UsefulAlertController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
@@ -54,6 +55,10 @@ Route::middleware(['auth'])->group(function () {
 });
 Route::middleware(['auth'])->group(function () {
     Route::get('/website-health', [WebhookHealthController::class, 'index'])->name('website-health.index');
+    Route::get('/alerts', [UsefulAlertController::class, 'index'])->name('alerts.index');
+    Route::post('/alerts/refresh', [UsefulAlertController::class, 'refresh'])->middleware('throttle:6,1,alerts-refresh')->name('alerts.refresh');
+    Route::post('/alerts/{alert}/snooze', [UsefulAlertController::class, 'snooze'])->whereNumber('alert')->middleware('throttle:30,1,alerts-actions')->name('alerts.snooze');
+    Route::post('/alerts/{alert}/resume', [UsefulAlertController::class, 'resume'])->whereNumber('alert')->middleware('throttle:30,1,alerts-actions')->name('alerts.resume');
     Route::get('/traffic', [TrafficController::class, 'index'])->name('traffic.index');
     Route::post('/traffic/refresh', [TrafficController::class, 'refresh'])->middleware('throttle:6,1,traffic-refresh')->name('traffic.refresh');
     Route::get('/traffic/status', [TrafficController::class, 'status'])->middleware('throttle:30,1,traffic-status')->name('traffic.status');

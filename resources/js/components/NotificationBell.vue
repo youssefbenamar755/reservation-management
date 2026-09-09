@@ -8,7 +8,7 @@ import {
 import OrderNotificationSound from '@/components/OrderNotificationSound.vue'
 import { Bell } from 'lucide-vue-next'
 import { computed, ref, onMounted, onUnmounted, useId } from 'vue'
-import { router, usePage } from '@inertiajs/vue3'
+import { Link, router, usePage } from '@inertiajs/vue3'
 import axios from 'axios'
 import { useEchoNotifications } from '@/composables/useEchoNotifications'
 import { createAutoRefresh } from '@/lib/liveOrders'
@@ -78,6 +78,7 @@ function formatTimeAgo(value: string): string {
 
 function notificationUrl(notification: AppNotification): string | null {
   const { type, order_id, submission_id } = notification.data
+  if (type === 'useful_alert') return '/alerts'
   if (type === 'order' && Number.isInteger(order_id) && order_id! > 0) return `/orders/${order_id}`
   if (type === 'form_submission' && Number.isInteger(submission_id) && submission_id! > 0) {
     return `/submissions/entries/${submission_id}`
@@ -169,6 +170,7 @@ onUnmounted(() => {
         </Button>
       </div>
       <div class="px-2 pb-2"><OrderNotificationSound /></div>
+      <div class="px-2 pb-2"><Link href="/alerts" class="text-sm font-medium text-primary underline underline-offset-4">View useful alerts</Link></div>
       <DropdownMenuSeparator />
       <p v-if="displayError" role="status" class="px-3 py-2 text-xs text-destructive">{{ displayError }}</p>
       <div class="max-h-[400px] overflow-y-auto">

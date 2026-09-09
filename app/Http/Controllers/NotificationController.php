@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\UsefulAlert;
 use Illuminate\Http\Request;
 
 class NotificationController extends Controller
@@ -63,6 +64,18 @@ class NotificationController extends Controller
             if ($submissionId) {
                 $redirectUrl = route('submissions.entry-details', $submissionId);
             }
+        } elseif ($type === 'useful_alert') {
+            // Old inbox items must not retain access after website ownership changes.
+            $alertId = $data['alert_id'] ?? null;
+            $alert = is_int($alertId) && $alertId > 0
+                ? UsefulAlert::where('user_id', $request->user()->id)
+                    ->whereHas('website', fn ($query) => $query->when(! $request->user()->is_admin,
+                        fn ($owned) => $owned->where('user_id', $request->user()->id)))
+                    ->find($alertId)
+                : null;
+            $redirectUrl = route('alerts.index', $alert ? [
+                'website_id' => $alert->website_id, 'kind' => $alert->kind, 'status' => 'all',
+            ] : []);
         }
 
         return response()->json([
