@@ -25,6 +25,7 @@ function canonicalType(value: unknown): string {
   if (typeof value !== 'string') return ''
   if (value === 'App\\Notifications\\NewOrderNotification') return 'order'
   if (value === 'App\\Notifications\\NewFormSubmissionNotification') return 'form_submission'
+  if (value === 'App\\Notifications\\UsefulAlertNotification') return 'useful_alert'
   return value
 }
 

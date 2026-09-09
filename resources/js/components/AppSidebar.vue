@@ -15,6 +15,7 @@ import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
 import {
     Activity,
+    BellRing,
     BookOpen,
     ClipboardList,
     FileText,
@@ -33,6 +34,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: '/dashboard',
         icon: LayoutGrid,
+    },
+    {
+        title: 'Useful alerts',
+        href: '/alerts',
+        icon: BellRing,
     },
     {
         title: 'Analytics',

@@ -34,3 +34,6 @@ Schedule::command('queue:work traffic --queue=traffic --stop-when-empty --max-jo
     ->everyMinute()->withoutOverlapping(6)->runInBackground();
 
 Schedule::command(\App\Console\Commands\TrafficPruneReports::class)->daily()->withoutOverlapping(5);
+
+// Grouped alerts read local records; no additional WooCommerce or Google requests.
+Schedule::command(\App\Console\Commands\ScanUsefulAlerts::class)->everyFiveMinutes()->withoutOverlapping(10)->runInBackground();

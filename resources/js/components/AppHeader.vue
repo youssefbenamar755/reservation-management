@@ -35,6 +35,7 @@ import { toUrl, urlIsActive } from '@/lib/utils';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
 import {
+    BellRing,
     BookOpen,
     ClipboardList,
     FileText,
@@ -77,6 +78,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: '/dashboard',
         icon: LayoutGrid,
+    },
+    {
+        title: 'Useful alerts',
+        href: '/alerts',
+        icon: BellRing,
     },
     {
         title: 'Analytics',
