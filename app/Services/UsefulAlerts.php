@@ -136,7 +136,11 @@ class UsefulAlerts
             $row = UsefulAlert::where('user_id', $user->id)->whereIn('website_id', $this->websites($user)->select('id'))->findOrFail($id);
             abort_if($row->resolved_at !== null, 409, 'This alert has already resolved. Refresh the view.');
             $now = CarbonImmutable::now()->startOfSecond();
+            if (! $snooze && ($row->snoozed_until === null || $row->snoozed_until <= $now)) {
+                return;
+            }
             $row->update(['snoozed_until' => $snooze ? $now->addDay() : null]);
+            app(ActionHistoryRecorder::class)->alert($user, $row, $snooze);
             if ($snooze) {
                 $this->readNotification($user, $row, $now);
             }

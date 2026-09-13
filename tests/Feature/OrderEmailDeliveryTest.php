@@ -88,6 +88,68 @@ function documentEmailPreview($test, array $values = []): OrderEmailDelivery
     return OrderEmailDelivery::findOrFail($response->json('preview.id'));
 }
 
+test('a history write failure rolls back an email claim before Gmail is contacted', function () {
+    $delivery = documentEmailPreview($this);
+    $requestsBeforeClaim = Http::recorded()->count();
+    DB::statement("CREATE TRIGGER history_claim_failure BEFORE INSERT ON action_history_events BEGIN SELECT RAISE(FAIL, 'synthetic history failure'); END");
+    try {
+        $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertStatus(500);
+        expect($delivery->fresh()->status)->toBe('prepared')->and($delivery->fresh()->send_attempts)->toBe(0)
+            ->and($this->sendCalls)->toBe(0)->and(\App\Models\ActionHistoryEvent::count())->toBe(0);
+        Http::assertSentCount($requestsBeforeClaim);
+    } finally {
+        DB::statement('DROP TRIGGER history_claim_failure');
+    }
+});
+
+test('a history result write failure does not repeat an accepted email', function () {
+    $delivery = documentEmailPreview($this);
+    DB::statement("CREATE TRIGGER history_send_result_failure BEFORE UPDATE ON action_history_events BEGIN SELECT RAISE(FAIL, 'synthetic history failure'); END");
+    try {
+        $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertOk()->assertJsonPath('delivery.status', 'sent');
+        $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertOk();
+        expect($this->sendCalls)->toBe(1)->and(\App\Models\ActionHistoryEvent::sole()->outcome)->toBe('pending');
+    } finally {
+        DB::statement('DROP TRIGGER history_send_result_failure');
+    }
+});
+
+test('an overlapping explicitly requested email retry keeps each result on its own history attempt', function () {
+    $delivery = documentEmailPreview($this);
+    $this->sendStatus = 429;
+    $retryStarted = false;
+    \Illuminate\Support\Facades\Event::listen('eloquent.updated: '.OrderEmailDelivery::class, function (OrderEmailDelivery $updated) use (&$retryStarted) {
+        if ($retryStarted || $updated->status !== 'failed') {
+            return;
+        }
+        $retryStarted = true;
+        $this->sendStatus = 200;
+        // Another request claims and finishes attempt 2 after attempt 1 has
+        // persisted its rejection, but before attempt 1 returns its response.
+        app(\App\Services\OrderEmailDeliveryService::class)->send($this->order, $updated->fresh(), $this->owner);
+    });
+    $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertOk()->assertJsonPath('delivery.status', 'sent');
+    $events = \App\Models\ActionHistoryEvent::orderBy('id')->get();
+    expect($this->sendCalls)->toBe(2)->and($events->pluck('outcome')->all())->toBe(['failed', 'succeeded'])
+        ->and($events->pluck('details.attempts')->all())->toBe([1, 2]);
+});
+
+test('history backfill uses retained metadata only and never fabricates individual earlier email attempts', function () {
+    $delivery = documentEmailPreview($this);
+    $requestsBeforeMigration = Http::recorded()->count();
+    // Deliberately invalid encrypted fields prove the backfill never decrypts email contents.
+    DB::table('order_email_deliveries')->where('id', $delivery->id)->update(['status' => 'sent', 'send_attempts' => 3,
+        'sending_at' => now()->subMinutes(5), 'sent_at' => now()->subMinutes(4), 'mime' => 'invalid ciphertext', 'snapshot' => 'invalid ciphertext']);
+    $migration = require database_path('migrations/2026_09_13_000001_create_action_history_events_table.php');
+    $migration->down();
+    $migration->up();
+    $event = \App\Models\ActionHistoryEvent::sole();
+    expect($event->kind)->toBe('email_record')->and($event->details)->toBe(['attempts' => 3])
+        ->and($event->outcome)->toBe('succeeded')->and($event->occurred_at->eq(now()->subMinutes(5)))->toBeTrue();
+    $this->getJson('/action-history')->assertOk()->assertJsonPath('history.total', 1)->assertJsonPath('history.data.0.title', 'Earlier email delivery');
+    Http::assertSentCount($requestsBeforeMigration);
+});
+
 test('email options render website templates and signature without any remote calls', function () {
     $response = $this->getJson(route('orders.email.context', $this->order))->assertOk()
         ->assertJsonPath('connection.connected', true)->assertJsonPath('sender.email', 'documents@example.test')
@@ -170,6 +232,11 @@ test('a known Gmail rejection permits only an explicitly confirmed later retry',
     $this->sendStatus = 200;
     $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertOk()->assertJsonPath('delivery.status', 'sent');
     expect($this->sendCalls)->toBe(2)->and($delivery->refresh()->send_attempts)->toBe(2);
+    $events = \App\Models\ActionHistoryEvent::orderBy('id')->get();
+    expect($events)->toHaveCount(2)->and($events->pluck('outcome')->all())->toBe(['failed', 'succeeded'])
+        ->and($events->pluck('details.attempts')->all())->toBe([1, 2]);
+    $this->postJson(route('orders.email.send', [$this->order, $delivery]), ['confirmed' => true])->assertOk();
+    expect(\App\Models\ActionHistoryEvent::count())->toBe(2)->and($this->sendCalls)->toBe(2);
 });
 
 test('expired previews cannot send and their immutable attachments are removed', function () {
