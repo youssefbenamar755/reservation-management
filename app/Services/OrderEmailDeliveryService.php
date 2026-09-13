@@ -35,6 +35,7 @@ class OrderEmailDeliveryService
                 return [$current, false];
             }
             $current->update(['status' => 'sending', 'sending_at' => now(), 'send_attempts' => $current->send_attempts + 1, 'result_message' => 'Gmail is processing this send request.']);
+            app(ActionHistoryRecorder::class)->beginEmail($current, $order);
 
             return [$current, true];
         }, 3);
@@ -77,7 +78,13 @@ class OrderEmailDeliveryService
             ]);
         }
 
+        // Record this claimed attempt before refreshing: another explicitly
+        // requested retry may already have changed the delivery's attempt number.
+        app(ActionHistoryRecorder::class)->finishEmail($current);
+
         // A mail client may request the image while Gmail is completing the send.
-        return $current->refresh();
+        $current->refresh();
+
+        return $current;
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Requests\OrderListFilterRequest;
 use App\Models\FfSubmission;
 use App\Models\WcOrder;
 use App\Models\Website;
+use App\Services\ActionHistoryRecorder;
 use App\Services\AmadeusDummyTicketGeneratorService;
 use App\Services\WooCommerceOrderStore;
 use Carbon\CarbonImmutable;
@@ -236,6 +237,13 @@ class WcOrderController extends Controller
         $website = $order->website;
 
         // Check if WooCommerce API credentials are available
+        $recorder = app(ActionHistoryRecorder::class);
+        $event = $recorder->beginStatus($request->user(), $order, $request->status);
+        $reply = function (string $message, int $status = 200, string $outcome = 'succeeded', string $reason = 'confirmed', ?string $confirmed = null) use ($recorder, $event, $request, $order) {
+            $recorder->finishStatus($event, $outcome, $reason, $confirmed);
+
+            return $this->statusResponse($request, $order, $message, $status);
+        };
         if ($website->wc_consumer_key && $website->wc_consumer_secret) {
             try {
                 $baseUrl = rtrim($website->base_url, '/');
@@ -262,7 +270,7 @@ class WcOrderController extends Controller
                         'error_message' => $message,
                     ]);
 
-                    return $this->statusResponse($request, $order, "WooCommerce rejected the status update (HTTP {$status}). The last confirmed status has been kept. Please retry.", 502);
+                    return $reply("WooCommerce rejected the status update (HTTP {$status}). The last confirmed status has been kept. Please retry.", 502, 'failed', 'rejected');
                 }
 
                 // Use the same timestamp guard as sync and webhooks. A newer
@@ -284,7 +292,7 @@ class WcOrderController extends Controller
                 if (! $valid) {
                     Log::warning('WooCommerce status update returned an incomplete or mismatched order', ['order_id' => $order->id]);
 
-                    return $this->statusResponse($request, $order, 'WooCommerce did not return a valid order confirmation. The last confirmed status has been kept; sync the order to check its latest status.', 502);
+                    return $reply('WooCommerce did not return a valid order confirmation. The last confirmed status has been kept; sync the order to check its latest status.', 502, 'uncertain', 'unconfirmed');
                 }
                 // A confirmation can omit optional extension fields. Keep those
                 // fields rather than erasing linked entries or order items.
@@ -298,13 +306,13 @@ class WcOrderController extends Controller
                 }
                 $result = $orders->store($website->id, $confirmedPayload);
                 if ($wooOrder['status'] !== $request->status) {
-                    return $this->statusResponse($request, $order, 'WooCommerce returned a different status. The latest confirmed status is shown; the requested change was not confirmed.', 409);
+                    return $reply('WooCommerce returned a different status. The latest confirmed status is shown; the requested change was not confirmed.', 409, 'failed', 'different_status', $wooOrder['status']);
                 }
                 if ($result['order']->status !== $wooOrder['status']) {
-                    return $this->statusResponse($request, $order, 'WooCommerce accepted the status update. A newer order update was retained locally.');
+                    return $reply('WooCommerce accepted the status update. A newer order update was retained locally.', 200, 'succeeded', 'newer_retained', $wooOrder['status']);
                 }
 
-                return $this->statusResponse($request, $order, 'Order status updated successfully in WooCommerce and locally.');
+                return $reply('Order status updated successfully in WooCommerce and locally.', 200, 'succeeded', 'confirmed', $wooOrder['status']);
             } catch (\Throwable $e) {
                 Log::error('Exception while updating order status in WooCommerce', [
                     'order_id' => $order->id,
@@ -314,10 +322,10 @@ class WcOrderController extends Controller
                     'error' => $e->getMessage(),
                 ]);
 
-                return $this->statusResponse($request, $order, 'The status update could not be confirmed. The last confirmed status has been kept; sync the order to check its latest status before retrying.', 502);
+                return $reply('The status update could not be confirmed. The last confirmed status has been kept; sync the order to check its latest status before retrying.', 502, 'uncertain', 'unconfirmed');
             }
         } else {
-            return $this->statusResponse($request, $order, 'Connect this website to WooCommerce before changing order statuses. The last confirmed status has been kept.', 422);
+            return $reply('Connect this website to WooCommerce before changing order statuses. The last confirmed status has been kept.', 422, 'failed', 'connection_required');
         }
     }
 

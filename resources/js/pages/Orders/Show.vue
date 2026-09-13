@@ -510,6 +510,12 @@ const flightData = computed(() => {
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <OrderEmailComposer :key="order.id" :order-id="order.id" :order-number="order.wp_order_id" />
+                    <Button variant="outline" as-child>
+                        <Link :href="`/action-history?order_id=${order.id}&website_id=${order.website_id}`">
+                            <History class="mr-2 size-4" />
+                            Action history
+                        </Link>
+                    </Button>
                     <Badge
                         :class="getStatusBadgeClass(order.status)"
                         class="px-3 py-1 text-sm font-medium"

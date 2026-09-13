@@ -68,6 +68,16 @@ test('a delayed status update response cannot overwrite a newer webhook state', 
     Http::assertSent(fn ($request) => $request->method() === 'PUT'
         && $request->url() === 'https://orders.example/wp-json/wc/v3/orders/42'
         && $request['status'] === 'processing');
+    $event = \App\Models\ActionHistoryEvent::sole();
+    expect($event->actor_id)->toBe($this->user->id)->and($event->outcome)->toBe('succeeded')
+        ->and($event->details)->toBe(['from' => 'pending', 'requested' => 'processing', 'reason' => 'newer_retained', 'confirmed' => 'processing']);
+});
+
+test('invalid or unauthorized status requests do not create history or contact WooCommerce', function () {
+    $this->actingAs($this->user)->putJson(route('orders.update', $this->order), ['status' => 'invalid'])->assertUnprocessable();
+    $this->actingAs(User::factory()->create())->putJson(route('orders.update', $this->order), ['status' => 'completed'])->assertForbidden();
+    expect(\App\Models\ActionHistoryEvent::count())->toBe(0);
+    Http::assertNothingSent();
 });
 
 test('a current WooCommerce status response is stored and reports success', function () {
@@ -116,6 +126,10 @@ test('failed or unconfirmed status updates preserve the last confirmed order', f
         ->put(route('orders.update', $this->order), ['status' => 'completed'])
         ->assertRedirect('/orders/'.$this->order->id)->assertSessionHas('error')->assertSessionMissing('success');
     expect($this->order->refresh()->getAttributes())->toBe($original);
+    $event = \App\Models\ActionHistoryEvent::sole();
+    expect($event->outcome)->toBe($failure === 'rejected' ? 'failed' : 'uncertain')
+        ->and($event->details['from'])->toBe('pending')->and($event->details['requested'])->toBe('completed')
+        ->and($event->finished_at)->not->toBeNull();
     if ($failure !== 'timeout') {
         Http::assertSentCount(1);
     }

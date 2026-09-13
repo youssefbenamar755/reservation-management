@@ -27,6 +27,28 @@ function alertTestSite(User $user): Website
     return Website::create(['user_id' => $user->id, 'name' => 'Alerts fixture', 'slug' => (string) Str::uuid(), 'base_url' => 'https://alerts.example.test']);
 }
 
+test('alert snooze and resume write personal action history atomically while a no-op resume records nothing', function () {
+    alertTestWebhook($this->site);
+    $service = app(UsefulAlerts::class);
+    $service->scan($this->actor);
+    $alert = UsefulAlert::sole();
+    $service->snooze($this->actor, $alert->id, false);
+    expect(\App\Models\ActionHistoryEvent::count())->toBe(0);
+    $service->snooze($this->actor, $alert->id, true);
+    $service->snooze($this->actor, $alert->id, false);
+    $events = \App\Models\ActionHistoryEvent::orderBy('id')->get();
+    expect($events->pluck('kind')->all())->toBe(['alert_snoozed', 'alert_resumed'])
+        ->and($events->first()->actor_id)->toBe($this->actor->id)
+        ->and($events->first()->details['alert_kind'])->toBe('webhook_failed');
+    DB::statement("CREATE TRIGGER history_alert_failure BEFORE INSERT ON action_history_events BEGIN SELECT RAISE(FAIL, 'synthetic history failure'); END");
+    try {
+        expect(fn () => $service->snooze($this->actor, $alert->id, true))->toThrow(\Illuminate\Database\QueryException::class);
+        expect($alert->fresh()->snoozed_until)->toBeNull()->and(\App\Models\ActionHistoryEvent::count())->toBe(2);
+    } finally {
+        DB::statement('DROP TRIGGER history_alert_failure');
+    }
+});
+
 function alertTestWebhook(Website $site, array $values = []): WebhookEvent
 {
     return WebhookEvent::create(array_replace(['website_id' => $site->id, 'source' => 'woocommerce', 'topic' => 'order.created',
