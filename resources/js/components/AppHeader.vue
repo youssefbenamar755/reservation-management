@@ -42,6 +42,7 @@ import {
     Folder,
     Globe,
     LayoutGrid,
+    Mail,
     Menu,
     Search,
     ShoppingCart,
@@ -118,6 +119,11 @@ const mainNavItems: NavItem[] = [
         title: 'Submissions',
         href: '/submissions',
         icon: FileText,
+    },
+    {
+        title: 'Marketing',
+        href: '/marketing',
+        icon: Mail,
     },
 ];
 

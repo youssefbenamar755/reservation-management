@@ -37,3 +37,6 @@ Schedule::command(\App\Console\Commands\TrafficPruneReports::class)->daily()->wi
 
 // Grouped alerts read local records; no additional WooCommerce or Google requests.
 Schedule::command(\App\Console\Commands\ScanUsefulAlerts::class)->everyFiveMinutes()->withoutOverlapping(10)->runInBackground();
+
+// Bounded marketing preparation; idle runs only check indexed local campaign state.
+Schedule::command(\App\Console\Commands\ProcessMarketingCampaigns::class)->everyMinute()->withoutOverlapping(3)->runInBackground();
