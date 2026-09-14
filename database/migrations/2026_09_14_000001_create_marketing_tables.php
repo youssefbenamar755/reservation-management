@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('marketing_connections', function (Blueprint $table) {
+        $this->createIfMissing('marketing_connections', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
             $table->text('api_key')->nullable();
@@ -22,7 +22,7 @@ return new class extends Migration
             $table->timestamp('last_event_at')->nullable();
             $table->timestamps();
         });
-        Schema::create('marketing_contacts', function (Blueprint $table) {
+        $this->createIfMissing('marketing_contacts', function (Blueprint $table) {
             $table->id();
             $table->foreignId('website_id')->constrained()->cascadeOnDelete();
             $table->string('email', 254);
@@ -36,7 +36,7 @@ return new class extends Migration
             $table->unique(['website_id', 'email']);
             $table->index(['website_id', 'status', 'locale']);
         });
-        Schema::create('marketing_consent_events', function (Blueprint $table) {
+        $this->createIfMissing('marketing_consent_events', function (Blueprint $table) {
             $table->id();
             $table->foreignId('marketing_contact_id')->constrained()->cascadeOnDelete();
             $table->foreignId('actor_id')->nullable()->constrained('users')->nullOnDelete();
@@ -45,7 +45,7 @@ return new class extends Migration
             $table->timestamp('consented_at')->nullable();
             $table->timestamp('created_at')->useCurrent();
         });
-        Schema::create('marketing_templates', function (Blueprint $table) {
+        $this->createIfMissing('marketing_templates', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('website_id')->constrained()->cascadeOnDelete();
@@ -54,7 +54,7 @@ return new class extends Migration
             $table->timestamps();
             $table->index(['user_id', 'website_id']);
         });
-        Schema::create('marketing_campaigns', function (Blueprint $table) {
+        $this->createIfMissing('marketing_campaigns', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('website_id')->constrained()->cascadeOnDelete();
@@ -76,9 +76,15 @@ return new class extends Migration
             $table->timestamps();
             $table->index(['status', 'scheduled_at']);
             $table->index(['user_id', 'website_id', 'id']);
-            $table->index(['marketing_connection_id', 'provider_campaign_id']);
         });
-        Schema::create('marketing_recipients', function (Blueprint $table) {
+        // MySQL limits identifiers to 64 characters and does not roll back earlier DDL
+        // when an index fails. Keep the name short and resume the original migration.
+        if (! Schema::hasIndex('marketing_campaigns', 'marketing_campaign_provider_index')) {
+            Schema::table('marketing_campaigns', function (Blueprint $table) {
+                $table->index(['marketing_connection_id', 'provider_campaign_id'], 'marketing_campaign_provider_index');
+            });
+        }
+        $this->createIfMissing('marketing_recipients', function (Blueprint $table) {
             $table->id();
             $table->foreignId('marketing_campaign_id')->constrained()->cascadeOnDelete();
             $table->foreignId('marketing_contact_id')->nullable()->constrained()->nullOnDelete();
@@ -91,7 +97,7 @@ return new class extends Migration
             $table->unique(['marketing_campaign_id', 'email']);
             $table->index(['marketing_campaign_id', 'status', 'id']);
         });
-        Schema::create('marketing_suppressions', function (Blueprint $table) {
+        $this->createIfMissing('marketing_suppressions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('marketing_connection_id')->constrained()->cascadeOnDelete();
             $table->string('email', 254);
@@ -99,6 +105,13 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['marketing_connection_id', 'email']);
         });
+    }
+
+    private function createIfMissing(string $table, Closure $definition): void
+    {
+        if (! Schema::hasTable($table)) {
+            Schema::create($table, $definition);
+        }
     }
 
     public function down(): void
