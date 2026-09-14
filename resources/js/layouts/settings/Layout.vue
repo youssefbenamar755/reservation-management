@@ -39,6 +39,10 @@ const sidebarNavItems: NavItem[] = [
         href: '/settings/email',
     },
     {
+        title: 'Marketing',
+        href: '/settings/marketing',
+    },
+    {
         title: 'Traffic & SEO',
         href: '/settings/traffic',
     },

@@ -22,6 +22,7 @@ import {
     Folder,
     Globe,
     LayoutGrid,
+    Mail,
     ShoppingCart,
     Target,
     TrendingUp,
@@ -79,6 +80,11 @@ const mainNavItems: NavItem[] = [
         title: 'Customers',
         href: '/customers',
         icon: Users,
+    },
+    {
+        title: 'Marketing',
+        href: '/marketing',
+        icon: Mail,
     },
     {
         title: 'Submissions',

@@ -6,6 +6,8 @@ use App\Http\Controllers\Webhook\WooWebhookController;
 use App\Http\Controllers\Webhook\FluentWebhookController;
 use App\Http\Controllers\EmailOpenController;
 
+Route::post('/marketing/events/{connection}', \App\Http\Controllers\MarketingWebhookController::class)->whereNumber('connection')->middleware('throttle:1200,1')->name('marketing.events');
+
 // Stateless image requests must not create a web session or require authentication.
 Route::get('/email/opens/{token}.gif', EmailOpenController::class)->name('emails.opens.show');
 
