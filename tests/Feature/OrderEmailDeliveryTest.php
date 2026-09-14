@@ -146,7 +146,7 @@ test('history backfill uses retained metadata only and never fabricates individu
     $event = \App\Models\ActionHistoryEvent::sole();
     expect($event->kind)->toBe('email_record')->and($event->details)->toBe(['attempts' => 3])
         ->and($event->outcome)->toBe('succeeded')->and($event->occurred_at->eq(now()->subMinutes(5)))->toBeTrue();
-    $this->getJson('/action-history')->assertOk()->assertJsonPath('history.total', 1)->assertJsonPath('history.data.0.title', 'Earlier email delivery');
+    $this->getJson('/settings/action-history')->assertOk()->assertJsonPath('history.total', 1)->assertJsonPath('history.data.0.title', 'Earlier email delivery');
     Http::assertSentCount($requestsBeforeMigration);
 });
 

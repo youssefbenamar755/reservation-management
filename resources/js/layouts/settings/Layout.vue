@@ -12,6 +12,8 @@ import { type NavItem } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
+withDefaults(defineProps<{ wide?: boolean }>(), { wide: false });
+
 const page = usePage();
 const user = page.props.auth.user;
 
@@ -40,6 +42,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Traffic & SEO',
         href: '/settings/traffic',
     },
+    {
+        title: 'Action history',
+        href: '/settings/action-history',
+    },
     // Only show User Management and Updates for admin users
     ...(user.is_admin
         ? [
@@ -55,7 +61,7 @@ const sidebarNavItems: NavItem[] = [
         : []),
 ];
 
-const currentPath = computed(() => page.url || '');
+const currentPath = computed(() => (page.url || '').replace(/[?#].*$/, ''));
 </script>
 
 <template>
@@ -66,7 +72,7 @@ const currentPath = computed(() => page.url || '');
         />
 
         <div class="flex flex-col lg:flex-row lg:space-x-12">
-            <aside class="w-full max-w-xl lg:w-48">
+            <aside class="w-full max-w-xl lg:w-48 lg:shrink-0">
                 <nav class="flex flex-col space-y-1 space-x-0">
                     <Button
                         v-for="item in sidebarNavItems"
@@ -78,7 +84,14 @@ const currentPath = computed(() => page.url || '');
                         ]"
                         as-child
                     >
-                        <Link :href="item.href">
+                        <Link
+                            :href="item.href"
+                            :aria-current="
+                                urlIsActive(item.href, currentPath)
+                                    ? 'page'
+                                    : undefined
+                            "
+                        >
                             <component :is="item.icon" class="h-4 w-4" />
                             {{ item.title }}
                         </Link>
@@ -88,8 +101,8 @@ const currentPath = computed(() => page.url || '');
 
             <Separator class="my-6 lg:hidden" />
 
-            <div class="flex-1 md:max-w-2xl">
-                <section class="max-w-xl space-y-12">
+            <div class="min-w-0 flex-1" :class="{ 'md:max-w-2xl': !wide }">
+                <section :class="wide ? 'space-y-8' : 'max-w-xl space-y-12'">
                     <slot />
                 </section>
             </div>

@@ -41,7 +41,6 @@ import {
     FileText,
     Folder,
     Globe,
-    History,
     LayoutGrid,
     Menu,
     Search,
@@ -84,11 +83,6 @@ const mainNavItems: NavItem[] = [
         title: 'Useful alerts',
         href: '/alerts',
         icon: BellRing,
-    },
-    {
-        title: 'Action history',
-        href: '/action-history',
-        icon: History,
     },
     {
         title: 'Analytics',
