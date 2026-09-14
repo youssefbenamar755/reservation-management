@@ -6,10 +6,12 @@ use App\Http\Controllers\Settings\TwoFactorAuthenticationController;
 use App\Http\Controllers\Settings\UpdateController;
 use App\Http\Controllers\Settings\EmailSettingsController;
 use App\Http\Controllers\Settings\TrafficSettingsController;
+use App\Http\Controllers\ActionHistoryController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::middleware('auth')->group(function () {
+    Route::get('settings/action-history', [ActionHistoryController::class, 'index'])->name('action-history.index');
     Route::get('settings/traffic', [TrafficSettingsController::class, 'index'])->name('traffic-settings.index');
     Route::put('settings/traffic/application', [TrafficSettingsController::class, 'application'])->middleware(['admin', 'throttle:6,1'])->name('traffic-settings.application');
     Route::post('settings/traffic/connect', [TrafficSettingsController::class, 'connect'])->middleware('throttle:6,1')->name('traffic-settings.connect');

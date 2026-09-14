@@ -56,7 +56,7 @@ Route::middleware(['auth'])->group(function () {
 });
 Route::middleware(['auth'])->group(function () {
     Route::get('/website-health', [WebhookHealthController::class, 'index'])->name('website-health.index');
-    Route::get('/action-history', [ActionHistoryController::class, 'index'])->name('action-history.index');
+    Route::get('/action-history', [ActionHistoryController::class, 'redirect'])->name('action-history.legacy');
     Route::get('/alerts', [UsefulAlertController::class, 'index'])->name('alerts.index');
     Route::post('/alerts/refresh', [UsefulAlertController::class, 'refresh'])->middleware('throttle:6,1,alerts-refresh')->name('alerts.refresh');
     Route::post('/alerts/{alert}/snooze', [UsefulAlertController::class, 'snooze'])->whereNumber('alert')->middleware('throttle:30,1,alerts-actions')->name('alerts.snooze');
