@@ -131,7 +131,7 @@ class MarketingContactDiscovery
             });
         $schemas = FfForm::where('website_id', $websiteId)->get(['form_id', 'fields'])->keyBy('form_id');
         FfSubmission::where('website_id', $websiteId)->select('id', 'website_id', 'form_id', 'email', 'payload')
-            ->chunkById(250, function ($submissions) use ($websiteId, &$added, $schemas) {
+            ->chunkById(25, function ($submissions) use ($websiteId, &$added, $schemas) {
                 $identities = [];
                 $invalid = [];
                 foreach ($submissions as $submission) {
