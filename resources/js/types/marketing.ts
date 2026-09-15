@@ -20,6 +20,10 @@ export interface MarketingPage<T> {
     next_page_url: string | null;
 }
 export interface MarketingContent {
+    layout?: string;
+    eyebrow?: string;
+    highlight_title?: string;
+    highlight_body?: string;
     locale: string;
     sender_email: string;
     sender_name: string;

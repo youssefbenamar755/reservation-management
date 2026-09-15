@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MarketingEmailPreview from '@/components/MarketingEmailPreview.vue';
 import MarketingLayout from '@/components/MarketingLayout.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -164,10 +165,7 @@ const launch = () => {
                         {{ campaign.content.preheader }}
                     </p>
                 </div>
-                <div
-                    class="marketing-preview overflow-x-auto bg-slate-100 p-2 sm:p-5"
-                    v-html="previewHtml"
-                />
+                <MarketingEmailPreview :html="previewHtml" />
             </section>
             <div class="space-y-5">
                 <section
