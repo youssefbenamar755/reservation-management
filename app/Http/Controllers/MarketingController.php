@@ -87,8 +87,9 @@ class MarketingController extends Controller
         $siteIds = $common['websites']->pluck('id')->all();
         $query = $this->audiences->query($siteId ? [$siteId] : $siteIds, $filters);
         $summary = (array) DB::query()->fromSub(clone $query, 'audience')->selectRaw("COUNT(*) as total, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed, SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown, SUM(CASE WHEN status = 'unsubscribed' THEN 1 ELSE 0 END) as unsubscribed")->first();
+        $bothAlias = DB::connection()->getQueryGrammar()->wrap('both');
         $websiteSummary = DB::query()->fromSub($this->audiences->query($siteIds), 'audience')->groupBy('website_id')
-            ->selectRaw("website_id, COUNT(*) as total, SUM(CASE WHEN orders_count > 0 THEN 1 ELSE 0 END) as orders, SUM(CASE WHEN submissions_count > 0 THEN 1 ELSE 0 END) as forms, SUM(CASE WHEN orders_count > 0 AND submissions_count > 0 THEN 1 ELSE 0 END) as both, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed")->get()->keyBy('website_id');
+            ->selectRaw("website_id, COUNT(*) as total, SUM(CASE WHEN orders_count > 0 THEN 1 ELSE 0 END) as orders, SUM(CASE WHEN submissions_count > 0 THEN 1 ELSE 0 END) as forms, SUM(CASE WHEN orders_count > 0 AND submissions_count > 0 THEN 1 ELSE 0 END) as {$bothAlias}, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed")->get()->keyBy('website_id');
         $connection = MarketingConnection::where('user_id', $request->user()->id)->first();
         $contacts = $query->orderByDesc('marketing_contacts.id')->paginate(25)->withQueryString();
         $suppressed = DB::table('marketing_suppressions')->where('marketing_connection_id', $connection?->id ?? 0)->whereIn('email', $contacts->pluck('email'))->pluck('reason', 'email');

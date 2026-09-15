@@ -146,6 +146,21 @@ test('audience counts follow filters while website overview retains full website
         ->and((int) data_get($page['websiteSummary'], $this->site->id.'.orders'))->toBe(1);
 });
 
+test('website overlap alias is quoted for MySQL where BOTH is a reserved keyword', function () {
+    $connection = DB::connection();
+    $originalGrammar = $connection->getQueryGrammar();
+    try {
+        $connection->setQueryGrammar(new \Illuminate\Database\Query\Grammars\MySqlGrammar($connection));
+        $connection->enableQueryLog();
+        $this->get('/marketing/audience')->assertOk();
+        $summaryQuery = collect($connection->getQueryLog())->pluck('query')->first(fn ($sql) => str_contains($sql, 'as forms'));
+        expect($summaryQuery)->toContain('as `both`')->not->toContain('as both,');
+    } finally {
+        $connection->disableQueryLog();
+        $connection->setQueryGrammar($originalGrammar);
+    }
+});
+
 test('changing or deleting a submission updates its contact source without duplicating history', function () {
     $entry = audienceEntry($this->site, ['email' => 'old@example.test']);
     $entry->update(['email' => 'new@example.test', 'website_id' => $this->secondSite->id]);
