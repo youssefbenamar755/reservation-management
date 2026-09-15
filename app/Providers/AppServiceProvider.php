@@ -2,8 +2,8 @@
 
 namespace App\Providers;
 
-use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -21,6 +21,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        \App\Models\WcOrder::observe(\App\Observers\MarketingSourceObserver::class);
+        \App\Models\FfSubmission::observe(\App\Observers\MarketingSourceObserver::class);
+
         // Force HTTPS in production
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
@@ -32,7 +35,7 @@ class AppServiceProvider extends ServiceProvider
                 'app_env' => config('app.env'),
                 'app_debug' => config('app.debug'),
             ]);
-            
+
             // Forcefully disable debug mode to prevent information leakage
             config(['app.debug' => false]);
         }

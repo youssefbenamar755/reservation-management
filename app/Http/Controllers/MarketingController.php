@@ -56,6 +56,7 @@ class MarketingController extends Controller
     {
         return $request->validate(['website_id' => ['nullable', 'integer', 'min:1'], 'locale' => ['nullable', Rule::in(['fr', 'en'])],
             'segment' => ['nullable', Rule::in(['all', 'first', 'repeat', 'inactive'])], 'status' => ['nullable', Rule::in(['unknown', 'subscribed', 'unsubscribed'])],
+            'source' => ['nullable', Rule::in(MarketingAudience::SOURCES)],
             'search' => ['nullable', 'string', 'max:200'], 'page' => ['nullable', 'integer', 'min:1', 'max:100000']]);
     }
 
@@ -78,18 +79,22 @@ class MarketingController extends Controller
     {
         $filters = $this->filters($request);
         $common = $this->common($request);
-        $siteId = (int) ($filters['website_id'] ?? $common['websites']->first()?->id ?? 0);
+        $siteId = (int) ($filters['website_id'] ?? 0);
         if ($siteId) {
             $this->site($request, $siteId);
         }
-        $filters['website_id'] = $siteId;
-        $summary = MarketingContact::where('website_id', $siteId)->selectRaw("COUNT(*) as total, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed, SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown, SUM(CASE WHEN status = 'unsubscribed' THEN 1 ELSE 0 END) as unsubscribed")->first()->getAttributes();
+        $filters['website_id'] = $siteId ?: null;
+        $siteIds = $common['websites']->pluck('id')->all();
+        $query = $this->audiences->query($siteId ? [$siteId] : $siteIds, $filters);
+        $summary = (array) DB::query()->fromSub(clone $query, 'audience')->selectRaw("COUNT(*) as total, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed, SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown, SUM(CASE WHEN status = 'unsubscribed' THEN 1 ELSE 0 END) as unsubscribed")->first();
+        $websiteSummary = DB::query()->fromSub($this->audiences->query($siteIds), 'audience')->groupBy('website_id')
+            ->selectRaw("website_id, COUNT(*) as total, SUM(CASE WHEN orders_count > 0 THEN 1 ELSE 0 END) as orders, SUM(CASE WHEN submissions_count > 0 THEN 1 ELSE 0 END) as forms, SUM(CASE WHEN orders_count > 0 AND submissions_count > 0 THEN 1 ELSE 0 END) as both, SUM(CASE WHEN status = 'subscribed' THEN 1 ELSE 0 END) as subscribed")->get()->keyBy('website_id');
         $connection = MarketingConnection::where('user_id', $request->user()->id)->first();
-        $contacts = $this->audiences->query($siteId, $filters)->orderByDesc('marketing_contacts.id')->paginate(25)->withQueryString();
+        $contacts = $query->orderByDesc('marketing_contacts.id')->paginate(25)->withQueryString();
         $suppressed = DB::table('marketing_suppressions')->where('marketing_connection_id', $connection?->id ?? 0)->whereIn('email', $contacts->pluck('email'))->pluck('reason', 'email');
         $contacts->through(fn ($c) => $c->toArray() + ['suppression' => $suppressed[$c->email] ?? null]);
 
-        return $this->page($request, 'Marketing/Audience', $common + ['filters' => $filters, 'summary' => array_map('intval', $summary), 'contacts' => $contacts]);
+        return $this->page($request, 'Marketing/Audience', $common + ['filters' => $filters, 'summary' => array_map('intval', $summary), 'contacts' => $contacts, 'websiteSummary' => $websiteSummary]);
     }
 
     public function discover(Request $request, Website $website)
@@ -97,7 +102,20 @@ class MarketingController extends Controller
         $this->site($request, $website->id);
         $count = $this->audiences->discover($website->id);
 
-        return back()->with('success', $count.' customer addresses added with no marketing permission. Existing preferences were preserved.');
+        return back()->with('success', $count.' new contacts added from synced orders and Fluent Forms entries. Sources refreshed; existing preferences preserved.');
+    }
+
+    public function discoverAudience(Request $request)
+    {
+        $filters = $this->filters($request);
+        $ids = $this->audiences->websites($request->user())->pluck('id');
+        if (! empty($filters['website_id'])) {
+            $this->site($request, (int) $filters['website_id']);
+            $ids = collect([(int) $filters['website_id']]);
+        }
+        $count = $ids->sum(fn ($id) => $this->audiences->discover($id));
+
+        return back()->with('success', $count.' new contacts added from synced orders and Fluent Forms entries. Sources refreshed; existing preferences preserved.');
     }
 
     private function contactData(array $input): array
@@ -232,13 +250,14 @@ class MarketingController extends Controller
     public function create(Request $request)
     {
         $data = $request->validate(['template_id' => ['required', 'integer'], 'name' => ['required', 'string', 'max:120'],
-            'locale' => ['nullable', Rule::in(['fr', 'en'])], 'segment' => ['required', Rule::in(['all', 'first', 'repeat', 'inactive'])]]);
+            'locale' => ['nullable', Rule::in(['fr', 'en'])], 'segment' => ['required', Rule::in(['all', 'first', 'repeat', 'inactive'])],
+            'source' => ['nullable', Rule::in(MarketingAudience::SOURCES)]]);
         $template = MarketingTemplate::where('user_id', $request->user()->id)->findOrFail($data['template_id']);
         $this->site($request, $template->website_id);
         $connection = MarketingConnection::where('user_id', $request->user()->id)->first();
         $campaign = MarketingCampaign::create(['user_id' => $request->user()->id, 'website_id' => $template->website_id,
             'marketing_connection_id' => $connection?->id, 'connection_key' => $connection?->connection_key,
-            'name' => $data['name'], 'content' => $template->content, 'audience' => ['locale' => $data['locale'] ?? null, 'segment' => $data['segment']]]);
+            'name' => $data['name'], 'content' => $template->content, 'audience' => ['locale' => $data['locale'] ?? null, 'segment' => $data['segment'], 'source' => $data['source'] ?? 'all']]);
 
         return redirect('/marketing/campaigns/'.$campaign->id);
     }

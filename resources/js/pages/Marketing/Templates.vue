@@ -3,7 +3,7 @@ import MarketingLayout from '@/components/MarketingLayout.vue';
 import MarketingPagination from '@/components/MarketingPagination.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { marketingSegments } from '@/lib/marketing';
+import { marketingSegments, marketingSources } from '@/lib/marketing';
 import type {
     MarketingCommon,
     MarketingContent,
@@ -53,6 +53,7 @@ const campaign = useForm({
     name: '',
     locale: '',
     segment: 'all',
+    source: 'all',
 });
 const fields: {
     key: keyof MarketingContent;
@@ -120,6 +121,7 @@ const useTemplate = (template: MarketingTemplate) => {
     campaign.name = template.name;
     campaign.locale = template.content.locale;
     campaign.segment = 'all';
+    campaign.source = 'all';
 };
 </script>
 <template>
@@ -394,7 +396,7 @@ const useTemplate = (template: MarketingTemplate) => {
                             <label
                                 for="campaign-segment"
                                 class="mb-2 block text-sm font-medium"
-                                >Audience</label
+                                >Order history</label
                             ><select
                                 id="campaign-segment"
                                 v-model="campaign.segment"
@@ -408,6 +410,37 @@ const useTemplate = (template: MarketingTemplate) => {
                                     {{ segment.label }}
                                 </option>
                             </select>
+                        </div>
+                        <div>
+                            <label
+                                for="campaign-source"
+                                class="mb-2 block text-sm font-medium"
+                                >Contact source</label
+                            >
+                            <select
+                                id="campaign-source"
+                                v-model="campaign.source"
+                                class="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                            >
+                                <option
+                                    v-for="source in marketingSources"
+                                    :key="source.value"
+                                    :value="source.value"
+                                >
+                                    {{ source.label }}
+                                </option>
+                            </select>
+                            <p class="mt-2 text-xs text-muted-foreground">
+                                Only subscribers for
+                                {{
+                                    websites.find(
+                                        (site) =>
+                                            site.id ===
+                                            campaignTemplate?.website_id,
+                                    )?.name
+                                }}
+                                who match both filters will qualify.
+                            </p>
                         </div>
                         <p class="text-xs text-muted-foreground">
                             The next screen previews your message and eligible

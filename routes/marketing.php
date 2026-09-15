@@ -10,6 +10,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/settings/marketing/connection', [MarketingSettingsController::class, 'disconnect'])->name('marketing-settings.disconnect');
     Route::get('/marketing', [MarketingController::class, 'index'])->name('marketing.index');
     Route::get('/marketing/audience', [MarketingController::class, 'audience'])->name('marketing.audience');
+    Route::post('/marketing/audience/discover', [MarketingController::class, 'discoverAudience'])->middleware('throttle:3,1')->name('marketing.audience.discover');
     Route::post('/marketing/websites/{website}/discover', [MarketingController::class, 'discover'])->middleware('throttle:3,1')->name('marketing.discover');
     Route::post('/marketing/websites/{website}/contacts', [MarketingController::class, 'contact'])->middleware('throttle:30,1')->name('marketing.contacts');
     Route::post('/marketing/websites/{website}/import', [MarketingController::class, 'import'])->middleware('throttle:3,1')->name('marketing.import');
