@@ -47,7 +47,7 @@ export interface MarketingCampaign {
     website_id: number;
     status: string;
     content: MarketingContent;
-    audience: { locale: string | null; segment: string };
+    audience: { locale: string | null; segment: string; source?: string };
     scheduled_at: string | null;
     submitted_at: string | null;
     test_sent_at: string | null;
@@ -58,6 +58,7 @@ export interface MarketingCampaign {
 }
 export interface MarketingContact {
     id: number;
+    website_id: number;
     email: string;
     name: string | null;
     locale: string | null;
@@ -67,5 +68,7 @@ export interface MarketingContact {
     orders_count: number;
     completed_count: number;
     last_order_at: string | null;
+    submissions_count: number;
+    last_submission_at: string | null;
     suppression: string | null;
 }

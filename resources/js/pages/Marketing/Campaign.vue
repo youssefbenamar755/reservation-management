@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import {
     marketingDate,
     marketingSegments,
+    marketingSources,
     marketingStatus,
     marketingTone,
 } from '@/lib/marketing';
@@ -190,6 +191,14 @@ const launch = () => {
                         </p>
                     </div>
                     <p class="text-sm">
+                        {{
+                            marketingSources.find(
+                                (s) =>
+                                    s.value ===
+                                    (campaign.audience.source || 'all'),
+                            )?.label
+                        }}
+                        ·
                         {{
                             marketingSegments.find(
                                 (s) => s.value === campaign.audience.segment,

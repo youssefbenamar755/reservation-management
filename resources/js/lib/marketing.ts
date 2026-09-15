@@ -1,3 +1,11 @@
+export const marketingSources = [
+    { value: 'all', label: 'All sources' },
+    { value: 'forms', label: 'Fluent Forms contacts' },
+    { value: 'orders', label: 'Order customers' },
+    { value: 'forms_only', label: 'Form leads · no orders' },
+    { value: 'orders_only', label: 'Order customers · no forms' },
+    { value: 'both', label: 'Forms and orders' },
+];
 export const marketingSegments = [
     { value: 'all', label: 'All subscribers' },
     { value: 'first', label: 'One completed order' },

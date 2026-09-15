@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import {
     marketingDate,
     marketingSegments,
+    marketingSources,
     marketingStatus,
     marketingTone,
 } from '@/lib/marketing';
@@ -15,18 +16,36 @@ import type {
     MarketingPage,
 } from '@/types/marketing';
 import { router, useForm } from '@inertiajs/vue3';
-import { Download, Plus, Search, Upload, Users } from 'lucide-vue-next';
-import { reactive, ref, watch } from 'vue';
+import {
+    Download,
+    Plus,
+    RefreshCw,
+    Search,
+    Upload,
+    Users,
+} from 'lucide-vue-next';
+import { computed, reactive, ref, watch } from 'vue';
 const props = defineProps<
     MarketingCommon & {
         contacts: MarketingPage<MarketingContact>;
         summary: Record<string, number>;
+        websiteSummary: Record<
+            number,
+            {
+                total: number;
+                forms: number;
+                orders: number;
+                both: number;
+                subscribed: number;
+            }
+        >;
         filters: {
-            website_id: number;
+            website_id: number | null;
             search?: string;
             locale?: string;
             segment?: string;
             status?: string;
+            source?: string;
         };
     }
 >();
@@ -35,7 +54,16 @@ const draft = reactive({
     locale: props.filters.locale || '',
     segment: props.filters.segment || 'all',
     status: props.filters.status || '',
+    source: props.filters.source || 'all',
 });
+const hasContacts = computed(() =>
+    props.websites.some(
+        (site) =>
+            (!props.filters.website_id ||
+                site.id === props.filters.website_id) &&
+            Number(props.websiteSummary[site.id]?.total || 0) > 0,
+    ),
+);
 watch(
     () => props.filters,
     (f) =>
@@ -44,6 +72,7 @@ watch(
             locale: f.locale || '',
             segment: f.segment || 'all',
             status: f.status || '',
+            source: f.source || 'all',
         }),
 );
 const panel = ref('');
@@ -93,19 +122,38 @@ const save = () =>
                 ? new Date(data.consented_at).toISOString()
                 : null,
         }))
-        .post('/marketing/websites/' + props.filters.website_id + '/contacts', {
-            preserveScroll: true,
-            onSuccess: () => {
-                panel.value = '';
-                form.reset();
+        .post(
+            '/marketing/websites/' +
+                (selected.value?.website_id || props.filters.website_id) +
+                '/contacts',
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    panel.value = '';
+                    form.reset();
+                },
             },
-        });
+        );
 const apply = () =>
     router.get(
         '/marketing/audience',
         { website_id: props.filters.website_id, ...draft },
         { preserveScroll: true, preserveState: true },
     );
+const websiteName = (id: number) =>
+    props.websites.find((site) => site.id === id)?.name || 'Website';
+const chooseWebsite = (id: number | null) => {
+    panel.value = '';
+    router.get(
+        '/marketing/audience',
+        { ...draft, website_id: id },
+        { preserveScroll: true },
+    );
+};
+const refreshContacts = () =>
+    discoverForm
+        .transform(() => ({ website_id: props.filters.website_id }))
+        .post('/marketing/audience/discover', { preserveScroll: true });
 const csvExample =
     'data:text/csv;charset=utf-8,' +
     encodeURIComponent(
@@ -115,14 +163,14 @@ const csvExample =
 <template>
     <MarketingLayout
         title="Marketing audience"
-        description="Manage subscribers and preferences for each website."
+        description="Know which website each contact belongs to and how they found you."
         active="Audience"
         :connected="connected"
     >
         <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <div
                 v-for="item in [
-                    { key: 'total', label: 'Website contacts' },
+                    { key: 'total', label: 'Matching contacts' },
                     { key: 'subscribed', label: 'Permission recorded' },
                     { key: 'unknown', label: 'No permission' },
                     { key: 'unsubscribed', label: 'Unsubscribed' },
@@ -136,6 +184,69 @@ const csvExample =
                 </p>
             </div>
         </div>
+        <section aria-label="Audience by website" class="space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="font-semibold">Audience by website</h2>
+                <Button
+                    v-if="filters.website_id"
+                    variant="ghost"
+                    size="sm"
+                    @click="chooseWebsite(null)"
+                    >Show all websites</Button
+                >
+            </div>
+            <p class="text-xs text-muted-foreground">
+                Website totals before filters. Each email appears once per
+                website; contacts found in both sources count once in the total.
+            </p>
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <button
+                    v-for="site in websites"
+                    :key="site.id"
+                    type="button"
+                    :aria-pressed="filters.website_id === site.id"
+                    class="rounded-xl border bg-card p-4 text-left transition-colors hover:border-teal-500 focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:outline-none"
+                    :class="
+                        filters.website_id === site.id
+                            ? 'border-teal-500 ring-1 ring-teal-500'
+                            : ''
+                    "
+                    @click="chooseWebsite(site.id)"
+                >
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="truncate font-medium">{{ site.name }}</span
+                        ><span class="text-xl font-semibold tabular-nums">{{
+                            websiteSummary[site.id]?.total || 0
+                        }}</span>
+                    </div>
+                    <p class="mt-1 truncate text-xs text-muted-foreground">
+                        {{ site.base_url }}
+                    </p>
+                    <div
+                        class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
+                    >
+                        <span
+                            ><strong class="font-medium text-foreground">{{
+                                websiteSummary[site.id]?.forms || 0
+                            }}</strong>
+                            form contacts</span
+                        >
+                        <span
+                            ><strong class="font-medium text-foreground">{{
+                                websiteSummary[site.id]?.orders || 0
+                            }}</strong>
+                            order customers</span
+                        >
+                        <span
+                            ><strong class="font-medium text-foreground">{{
+                                websiteSummary[site.id]?.both || 0
+                            }}</strong>
+                            both</span
+                        >
+                    </div>
+                </button>
+            </div>
+        </section>
         <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
                 <label
@@ -144,18 +255,17 @@ const csvExample =
                     >Website</label
                 ><select
                     id="audience-site"
-                    :value="filters.website_id"
+                    :value="filters.website_id || ''"
                     class="h-10 max-w-full rounded-lg border bg-background px-3 text-sm"
                     @change="
-                        router.get('/marketing/audience', {
-                            website_id: ($event.target as HTMLSelectElement)
-                                .value,
-                        })
+                        chooseWebsite(
+                            Number(
+                                ($event.target as HTMLSelectElement).value,
+                            ) || null,
+                        )
                     "
                 >
-                    <option v-if="!websites.length" value="0">
-                        Add a website first
-                    </option>
+                    <option value="">All websites</option>
                     <option
                         v-for="site in websites"
                         :key="site.id"
@@ -168,19 +278,15 @@ const csvExample =
             <div class="flex flex-wrap gap-2">
                 <Button
                     variant="outline"
-                    :disabled="!filters.website_id || discoverForm.processing"
-                    @click="
-                        discoverForm.post(
-                            '/marketing/websites/' +
-                                filters.website_id +
-                                '/discover',
-                            { preserveScroll: true },
-                        )
-                    "
-                    ><Users class="size-4" />{{
+                    :disabled="!websites.length || discoverForm.processing"
+                    @click="refreshContacts"
+                    ><RefreshCw
+                        class="size-4"
+                        :class="discoverForm.processing ? 'animate-spin' : ''"
+                    />{{
                         discoverForm.processing
-                            ? 'Adding…'
-                            : 'Add existing customers'
+                            ? 'Refreshing…'
+                            : 'Refresh contacts'
                     }}</Button
                 ><Button
                     variant="outline"
@@ -193,10 +299,12 @@ const csvExample =
             </div>
         </div>
         <p class="text-xs text-muted-foreground">
-            Existing customers are added with no marketing permission.
-            Permission is specific to this website; a Brevo unsubscribe, hard
-            bounce or complaint excludes the address from campaigns on that
-            connection.
+            New synced orders and Fluent Forms entries add contacts
+            automatically. Refresh contacts includes older synced records.
+            Select a website to add a contact or import a CSV. New contacts
+            start with no marketing permission. Permission is specific to this
+            website; a Brevo unsubscribe, hard bounce or complaint excludes the
+            address from campaigns on that connection.
         </p>
         <section
             v-if="panel === 'contact'"
@@ -205,7 +313,12 @@ const csvExample =
         >
             <div class="mb-5 flex items-center justify-between">
                 <h2 class="text-lg font-semibold">
-                    {{ selected ? 'Contact preferences' : 'Add a contact' }}
+                    {{ selected ? 'Contact preferences' : 'Add a contact' }} ·
+                    {{
+                        websiteName(
+                            selected?.website_id || filters.website_id || 0,
+                        )
+                    }}
                 </h2>
                 <Button variant="ghost" size="sm" @click="panel = ''"
                     >Close</Button
@@ -409,6 +522,26 @@ const csvExample =
             </div>
             <div>
                 <label
+                    for="audience-source"
+                    class="mb-2 block text-xs font-medium"
+                    >Contact source</label
+                >
+                <select
+                    id="audience-source"
+                    v-model="draft.source"
+                    class="h-10 max-w-full rounded-md border bg-background px-3 text-sm"
+                >
+                    <option
+                        v-for="source in marketingSources"
+                        :key="source.value"
+                        :value="source.value"
+                    >
+                        {{ source.label }}
+                    </option>
+                </select>
+            </div>
+            <div>
+                <label
                     for="audience-status"
                     class="mb-2 block text-xs font-medium"
                     >Preference</label
@@ -470,30 +603,33 @@ const csvExample =
                 <Users class="mx-auto mb-4 size-9 text-muted-foreground" />
                 <h2 class="text-lg font-semibold">
                     {{
-                        summary.total
+                        hasContacts
                             ? 'No contacts match these filters'
-                            : 'Start with your website’s customers'
+                            : 'Bring your audience together'
                     }}
                 </h2>
                 <p class="mt-2 text-sm text-muted-foreground">
                     {{
-                        summary.total
+                        hasContacts
                             ? 'Adjust your filters to see more contacts.'
-                            : 'Add existing customers, import a permission-based list, or add a contact individually.'
+                            : 'Refresh contacts to include synced orders and Fluent Forms entries, or select a website to import contacts.'
                     }}
                 </p>
             </div>
             <div v-else class="relative overflow-x-auto">
-                <table class="w-full text-left text-sm">
+                <table class="w-full min-w-[1000px] text-left text-sm">
                     <thead class="bg-muted/50 text-muted-foreground">
                         <tr>
                             <th class="px-5 py-3 font-medium">Contact</th>
+                            <th class="px-5 py-3 font-medium">
+                                Website & source
+                            </th>
                             <th class="px-5 py-3 font-medium">Preference</th>
                             <th class="px-5 py-3 font-medium">Language</th>
+                            <th class="px-5 py-3 font-medium">Activity</th>
                             <th class="px-5 py-3 font-medium">
-                                Completed orders
+                                Latest activity
                             </th>
-                            <th class="px-5 py-3 font-medium">Last order</th>
                             <th class="px-5 py-3">
                                 <span class="sr-only">Manage</span>
                             </th>
@@ -512,6 +648,31 @@ const csvExample =
                                 <p class="mt-1 text-xs text-muted-foreground">
                                     {{ contact.email }}
                                 </p>
+                            </td>
+                            <td class="px-5 py-4">
+                                <p class="font-medium">
+                                    {{ websiteName(contact.website_id) }}
+                                </p>
+                                <div class="mt-2 flex flex-wrap gap-1.5">
+                                    <span
+                                        v-if="contact.submissions_count > 0"
+                                        class="rounded-full bg-violet-50 px-2 py-1 text-xs text-violet-800 dark:bg-violet-950 dark:text-violet-200"
+                                        >Fluent Forms</span
+                                    >
+                                    <span
+                                        v-if="contact.orders_count > 0"
+                                        class="rounded-full bg-sky-50 px-2 py-1 text-xs text-sky-800 dark:bg-sky-950 dark:text-sky-200"
+                                        >Orders</span
+                                    >
+                                    <span
+                                        v-if="
+                                            !Number(contact.orders_count) &&
+                                            !Number(contact.submissions_count)
+                                        "
+                                        class="text-xs text-muted-foreground"
+                                        >No linked activity</span
+                                    >
+                                </div>
                             </td>
                             <td class="px-5 py-4">
                                 <span
@@ -536,12 +697,43 @@ const csvExample =
                                 }}
                             </td>
                             <td class="px-5 py-4 tabular-nums">
-                                {{ contact.completed_count }}
+                                <p>
+                                    {{ contact.orders_count }} orders
+                                    <span class="text-xs text-muted-foreground"
+                                        >·
+                                        {{ contact.completed_count }}
+                                        completed</span
+                                    >
+                                </p>
+                                <p class="mt-1 text-xs text-muted-foreground">
+                                    {{ contact.submissions_count }} form entries
+                                </p>
                             </td>
                             <td
                                 class="px-5 py-4 whitespace-nowrap text-muted-foreground"
                             >
-                                {{ marketingDate(contact.last_order_at) }}
+                                <p v-if="contact.last_order_at">
+                                    <span class="text-xs">Order · </span
+                                    >{{ marketingDate(contact.last_order_at) }}
+                                </p>
+                                <p
+                                    v-if="contact.last_submission_at"
+                                    class="mt-1"
+                                >
+                                    <span class="text-xs">Form · </span
+                                    >{{
+                                        marketingDate(
+                                            contact.last_submission_at,
+                                        )
+                                    }}
+                                </p>
+                                <span
+                                    v-if="
+                                        !contact.last_order_at &&
+                                        !contact.last_submission_at
+                                    "
+                                    >—</span
+                                >
                             </td>
                             <td class="px-5 py-4">
                                 <Button
