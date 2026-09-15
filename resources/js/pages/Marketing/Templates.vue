@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MarketingEmailPreview from '@/components/MarketingEmailPreview.vue';
 import MarketingLayout from '@/components/MarketingLayout.vue';
 import MarketingPagination from '@/components/MarketingPagination.vue';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,10 @@ const initial = (): MarketingContent & {
 } => ({
     website_id: props.websiteId,
     name: '',
+    layout: 'studio',
+    eyebrow: '',
+    highlight_title: '',
+    highlight_body: '',
     locale: 'fr',
     sender_email: '',
     sender_name:
@@ -66,6 +71,7 @@ const fields: {
     { key: 'subject', label: 'Subject', required: true },
     { key: 'preheader', label: 'Inbox preview text' },
     { key: 'headline', label: 'Email heading', required: true },
+    { key: 'eyebrow', label: 'Small heading above title' },
     { key: 'logo_url', label: 'Logo URL (HTTPS)', type: 'url' },
     { key: 'cta_text', label: 'Button text' },
     { key: 'cta_url', label: 'Button destination (HTTPS)', type: 'url' },
@@ -77,6 +83,13 @@ const reset = () => {
     previewHtml.value = '';
 };
 watch(() => props.websiteId, reset);
+watch(
+    () => form.data(),
+    () => {
+        previewHtml.value = '';
+    },
+    { deep: true },
+);
 const edit = (template: MarketingTemplate) => {
     reset();
     editing.value = template.id;
@@ -85,7 +98,11 @@ const edit = (template: MarketingTemplate) => {
         Object.fromEntries(
             Object.entries(template.content).map(([k, v]) => [k, v ?? '']),
         ),
-        { name: template.name, website_id: template.website_id },
+        {
+            name: template.name,
+            website_id: template.website_id,
+            layout: template.content.layout || 'classic',
+        },
     );
 };
 const save = () => {
@@ -183,8 +200,9 @@ const useTemplate = (template: MarketingTemplate) => {
                         {{ editing ? 'Edit template' : 'Create a template' }}
                     </h2>
                     <p class="mt-1 text-sm text-muted-foreground">
-                        Messages are formatted automatically. Write in plain
-                        text and add an optional button.
+                        Choose a layout, add your branding and write your
+                        message. Preview it at desktop and mobile sizes before
+                        saving.
                     </p>
                 </div>
                 <div class="grid gap-4 sm:grid-cols-2">
@@ -215,6 +233,28 @@ const useTemplate = (template: MarketingTemplate) => {
                             <option value="en">English</option>
                         </select>
                     </div>
+                </div>
+                <div>
+                    <label
+                        for="template-layout"
+                        class="mb-2 block text-sm font-medium"
+                        >Email layout</label
+                    >
+                    <select
+                        id="template-layout"
+                        v-model="form.layout"
+                        class="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                    >
+                        <option value="studio">
+                            Brand spotlight · colored introduction
+                        </option>
+                        <option value="letter">
+                            Personal letter · clean white layout
+                        </option>
+                        <option value="classic">
+                            Classic · original layout
+                        </option>
+                    </select>
                 </div>
                 <div>
                     <label
@@ -269,6 +309,42 @@ const useTemplate = (template: MarketingTemplate) => {
                         class="w-full rounded-lg border bg-background p-3 text-sm leading-6"
                     />
                 </div>
+                <div
+                    v-if="form.layout !== 'classic'"
+                    class="space-y-4 rounded-lg border bg-muted/20 p-4"
+                >
+                    <div>
+                        <label
+                            for="template-highlight-title"
+                            class="mb-2 block text-sm font-medium"
+                            >Highlights heading</label
+                        >
+                        <Input
+                            id="template-highlight-title"
+                            v-model="form.highlight_title"
+                            maxlength="120"
+                            placeholder="Your next steps"
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="template-highlight-body"
+                            class="mb-2 block text-sm font-medium"
+                            >Highlights · one per line</label
+                        >
+                        <textarea
+                            id="template-highlight-body"
+                            v-model="form.highlight_body"
+                            rows="4"
+                            maxlength="1500"
+                            class="w-full rounded-lg border bg-background p-3 text-sm leading-6"
+                        />
+                        <p class="mt-1 text-xs text-muted-foreground">
+                            These appear in a separate numbered panel. Leave
+                            empty to hide it.
+                        </p>
+                    </div>
+                </div>
                 <div class="grid gap-4 sm:grid-cols-2">
                     <div>
                         <label
@@ -287,11 +363,10 @@ const useTemplate = (template: MarketingTemplate) => {
                         <label
                             for="template-address"
                             class="mb-2 block text-sm font-medium"
-                            >Business postal address</label
+                            >Business postal address (optional)</label
                         ><textarea
                             id="template-address"
                             v-model="form.postal_address"
-                            required
                             rows="4"
                             class="w-full rounded-lg border bg-background p-3 text-sm"
                         />
@@ -467,6 +542,31 @@ const useTemplate = (template: MarketingTemplate) => {
                         :key="template.id"
                         class="space-y-3 border-b p-5 last:border-b-0"
                     >
+                        <div
+                            class="flex min-h-20 items-center justify-between gap-3 rounded-lg border-t-4 bg-white px-4 py-3"
+                            :style="{
+                                borderColor: template.content.accent_color,
+                            }"
+                        >
+                            <img
+                                v-if="template.content.logo_url"
+                                :src="template.content.logo_url"
+                                :alt="template.content.sender_name"
+                                class="h-auto max-h-12 w-32 object-contain object-left"
+                            />
+                            <span
+                                v-else
+                                class="text-sm font-semibold text-slate-900"
+                                >{{ template.content.sender_name }}</span
+                            >
+                            <span class="text-xs text-slate-500">{{
+                                template.content.layout === 'studio'
+                                    ? 'Spotlight'
+                                    : template.content.layout === 'letter'
+                                      ? 'Letter'
+                                      : 'Classic'
+                            }}</span>
+                        </div>
                         <div>
                             <h3 class="font-medium">{{ template.name }}</h3>
                             <p class="mt-1 text-sm text-muted-foreground">
@@ -478,7 +578,18 @@ const useTemplate = (template: MarketingTemplate) => {
                                 · {{ template.content.subject }}
                             </p>
                         </div>
-                        <div class="flex gap-3">
+                        <div class="flex flex-wrap gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                :disabled="previewBusy"
+                                @click="
+                                    edit(template);
+                                    preview();
+                                "
+                                ><Eye class="size-3.5" />Preview</Button
+                            >
                             <Button
                                 type="button"
                                 variant="outline"
@@ -498,18 +609,7 @@ const useTemplate = (template: MarketingTemplate) => {
                         :page="templates"
                     />
                 </div>
-                <div
-                    v-if="previewHtml"
-                    class="overflow-hidden rounded-xl border bg-slate-100"
-                >
-                    <h2 class="border-b bg-card px-5 py-4 font-semibold">
-                        Email preview
-                    </h2>
-                    <div
-                        class="marketing-preview overflow-x-auto p-2"
-                        v-html="previewHtml"
-                    />
-                </div>
+                <MarketingEmailPreview v-if="previewHtml" :html="previewHtml" />
             </div>
         </div>
     </MarketingLayout>

@@ -18,7 +18,11 @@ class MarketingContent
             'headline' => ['required', 'string', 'max:200', 'not_regex:/[{}]/'],
             'body' => ['required', 'string', 'max:15000', 'not_regex:/[{}]/'],
             'signature' => ['required', 'string', 'max:1000', 'not_regex:/[{}]/'],
-            'postal_address' => ['required', 'string', 'max:500', 'not_regex:/[{}]/'],
+            'postal_address' => ['nullable', 'string', 'max:500', 'not_regex:/[{}]/'],
+            'layout' => ['nullable', Rule::in(['classic', 'studio', 'letter'])],
+            'eyebrow' => ['nullable', 'string', 'max:80', 'not_regex:/[{}]/'],
+            'highlight_title' => ['nullable', 'string', 'max:120', 'not_regex:/[{}]/'],
+            'highlight_body' => ['nullable', 'string', 'max:1500', 'not_regex:/[{}]/'],
             'logo_url' => ['nullable', 'url:https', 'max:1000', 'not_regex:/[{}]/'],
             'accent_color' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/D'],
             'cta_text' => ['nullable', 'required_with:cta_url', 'string', 'max:80', 'not_regex:/[{}]/'],
@@ -33,6 +37,7 @@ class MarketingContent
         $unsubscribe = $preview ? '#' : '{{ unsubscribe }}';
         $label = ($content['locale'] ?? 'en') === 'fr' ? 'Se désinscrire' : 'Unsubscribe';
         $why = ($content['locale'] ?? 'en') === 'fr' ? 'Vous recevez cet e-mail car vous êtes abonné(e) aux actualités de' : 'You received this email because you subscribed to updates from';
+        $c['postal_address'] ??= '';
         $logo = empty($c['logo_url']) ? '' : '<img src="'.$c['logo_url'].'" alt="'.$c['sender_name'].'" width="160" style="max-width:160px;max-height:80px;object-fit:contain;margin-bottom:24px">';
         $ctaUrl = $content['cta_url'] ?? '';
         if ($campaignId && $ctaUrl !== '') {
@@ -40,6 +45,22 @@ class MarketingContent
             $fragment = str_contains($ctaUrl, '#') ? '#'.explode('#', $ctaUrl, 2)[1] : '';
             $ctaUrl = explode('#', $ctaUrl, 2)[0];
             $ctaUrl .= (str_contains($ctaUrl, '?') ? '&' : '?').http_build_query(['utm_source' => 'wphub', 'utm_medium' => 'email', 'utm_campaign' => 'campaign_'.$campaignId]).$fragment;
+        }
+        if (in_array($content['layout'] ?? '', ['studio', 'letter'], true)) {
+            $accent = $content['accent_color'];
+            $rgb = array_map('hexdec', str_split(substr($accent, 1), 2));
+            $tint = '#'.implode('', array_map(fn ($v) => sprintf('%02x', (int) round($v * .08 + 255 * .92)), $rgb));
+            $luminance = array_sum(array_map(function ($v, $weight) {
+                $v /= 255;
+
+                return ($v <= .04045 ? $v / 12.92 : (($v + .055) / 1.055) ** 2.4) * $weight;
+            }, $rgb, [.2126, .7152, .0722]));
+            $buttonText = $luminance > .179 ? '#101828' : '#ffffff';
+
+            return view('emails.marketing-branded', [
+                'content' => $content, 'ctaUrl' => $ctaUrl, 'unsubscribe' => $unsubscribe,
+                'label' => $label, 'why' => $why, 'tint' => $tint, 'buttonText' => $buttonText,
+            ])->render();
         }
         $cta = $ctaUrl === '' ? '' : '<p style="margin:28px 0"><a href="'.e($ctaUrl).'" style="display:inline-block;background:'.$c['accent_color'].';color:#ffffff;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:bold">'.$c['cta_text'].'</a></p>';
 
