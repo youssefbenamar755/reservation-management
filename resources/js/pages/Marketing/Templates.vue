@@ -609,7 +609,11 @@ const useTemplate = (template: MarketingTemplate) => {
                         :page="templates"
                     />
                 </div>
-                <MarketingEmailPreview v-if="previewHtml" :html="previewHtml" />
+                <MarketingEmailPreview
+                    v-if="previewHtml"
+                    :html="previewHtml"
+                    auto-open
+                />
             </div>
         </div>
     </MarketingLayout>
