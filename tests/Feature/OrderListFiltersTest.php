@@ -113,6 +113,54 @@ test('orders selected website cannot bypass tenant scope while admins can use it
         ->assertOk()->assertJsonPath('orders.total', 1)->assertJsonPath('orders.summary.completed_revenue.0.total', 1000);
 });
 
+test('orders search matches full and partial transaction IDs without loading private payloads', function (string $search) {
+    listingOrder($this->website, 1, ['payload' => ['transaction_id' => '5FK83972AB100128X', 'private' => 'must-not-load']]);
+    listingOrder($this->website, 2, ['payload' => ['transaction_id' => 'OTHER', 'customer_note' => '5FK83972AB100128X']]);
+    $this->actingAs($this->owner)->getJson(route('orders.index', ['search' => $search]))->assertOk()
+        ->assertJsonPath('orders.total', 1)->assertJsonPath('orders.data.0.wp_order_id', 1)
+        ->assertJsonPath('orders.summary.completed', 1)->assertJsonPath('orders.summary.completed_revenue.0.total', 25)
+        ->assertJsonMissingPath('orders.data.0.payload');
+    Http::assertNothingSent();
+})->with(['5FK83972AB100128X', '100128', '5fk83972ab', '  5FK83972AB100128X  ']);
+
+test('transaction ID searches treat wildcard and escape characters literally', function (string $search) {
+    listingOrder($this->website, 1, ['payload' => ['transaction_id' => 'PAY'.$search.'END']]);
+    listingOrder($this->website, 2, ['payload' => ['transaction_id' => 'PAYotherEND']]);
+    $this->actingAs($this->owner)->getJson(route('orders.index', ['search' => $search]))->assertOk()
+        ->assertJsonPath('orders.total', 1)->assertJsonPath('orders.data.0.wp_order_id', 1);
+})->with(['%', '_', '!', "'%_!\\"]);
+
+test('transaction ID searches exclude missing and null IDs and accept zero', function () {
+    listingOrder($this->website, 1, ['payload' => []]);
+    listingOrder($this->website, 2, ['payload' => ['transaction_id' => null]]);
+    listingOrder($this->website, 3, ['payload' => ['transaction_id' => '']]);
+    listingOrder($this->website, 4, ['payload' => ['transaction_id' => '0']]);
+    $this->actingAs($this->owner)->getJson(route('orders.index', ['search' => 'null']))->assertOk()->assertJsonPath('orders.total', 0);
+    $this->getJson(route('orders.index', ['search' => '0']))->assertOk()->assertJsonPath('orders.total', 1)->assertJsonPath('orders.data.0.wp_order_id', 4);
+});
+
+test('transaction searches retain website status date tenant and pagination constraints', function () {
+    $other = Website::create(['user_id' => $this->owner->id, 'name' => 'Second', 'slug' => 'txn-second', 'base_url' => 'https://second.example']);
+    $foreign = Website::create(['user_id' => User::factory()->create()->id, 'name' => 'Foreign', 'slug' => 'txn-foreign', 'base_url' => 'https://foreign.example']);
+    $values = ['payload' => ['transaction_id' => 'PAY-shared'], 'status' => 'completed', 'total' => 10];
+    foreach (range(1, 16) as $id) {
+        listingOrder($this->website, $id, $values);
+    }
+    listingOrder($this->website, 17, array_replace($values, ['status' => 'failed']));
+    listingOrder($this->website, 18, array_replace($values, ['created_at_wp' => '2026-09-01 12:00:00']));
+    listingOrder($other, 1, $values);
+    listingOrder($foreign, 1, $values);
+    $this->actingAs($this->owner)->getJson(route('orders.index', ['search' => 'PAY-shared']))->assertOk()->assertJsonPath('orders.total', 19);
+    $filters = ['search' => 'PAY-shared', 'website_id' => $this->website->id, 'status' => 'completed', 'start_date' => '2026-09-02', 'end_date' => '2026-09-02', 'page' => 2];
+    $response = $this->getJson(route('orders.index', $filters))->assertOk()->assertJsonCount(1, 'orders.data')
+        ->assertJsonPath('orders.total', 16)->assertJsonPath('orders.summary.completed', 16)
+        ->assertJsonPath('orders.summary.failed', 0)->assertJsonPath('orders.summary.completed_revenue.0.total', 160);
+    expect($response->json('orders.prev_page_url'))->toContain('search=PAY-shared', 'website_id='.$this->website->id);
+    $this->get(route('orders.index', $filters))->assertInertia(fn (Assert $page) => $page
+        ->component('Orders/Index')->where('orders.total', 16)->has('orders.data', 1)->where('filters.search', 'PAY-shared'));
+    Http::assertNothingSent();
+});
+
 test('orders supported page sizes and links preserve applied filters', function (int $perPage) {
     foreach (range(1, 32) as $id) {
         listingOrder($this->website, $id);
