@@ -37,10 +37,14 @@ class WcOrderController extends Controller
         }
         if (isset($filters['search']) && $filters['search'] !== '') {
             $pattern = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['search']).'%';
+            $transactionId = $query->getQuery()->getGrammar()->wrap('payload->transaction_id');
             $query->where(fn ($search) => $search
                 ->whereRaw("wp_order_id LIKE ? ESCAPE '!'", [$pattern])
                 ->orWhereRaw("customer_name LIKE ? ESCAPE '!'", [$pattern])
-                ->orWhereRaw("customer_email LIKE ? ESCAPE '!'", [$pattern]));
+                ->orWhereRaw("customer_email LIKE ? ESCAPE '!'", [$pattern])
+                ->orWhere(fn ($transaction) => $transaction
+                    ->whereNotNull('payload->transaction_id')
+                    ->whereRaw("LOWER({$transactionId}) LIKE LOWER(?) ESCAPE '!'", [$pattern])));
         }
         if (! empty($filters['start_date'])) {
             $query->where('created_at_wp', '>=', CarbonImmutable::parse($filters['start_date'], config('app.timezone'))->startOfDay());
