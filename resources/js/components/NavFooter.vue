@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/sidebar';
 import { toUrl } from '@/lib/utils';
 import { type NavItem } from '@/types';
+import { Link, usePage } from '@inertiajs/vue3';
 
 interface Props {
     items: NavItem[];
@@ -15,6 +16,7 @@ interface Props {
 }
 
 defineProps<Props>();
+const page = usePage();
 </script>
 
 <template>
@@ -27,15 +29,28 @@ defineProps<Props>();
                     <SidebarMenuButton
                         class="text-neutral-600 hover:text-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
                         as-child
+                        :is-active="
+                            page.url.split(/[?#]/)[0] === toUrl(item.href)
+                        "
                     >
-                        <a
+                        <component
+                            :is="toUrl(item.href).startsWith('/') ? Link : 'a'"
                             :href="toUrl(item.href)"
-                            target="_blank"
+                            :target="
+                                toUrl(item.href).startsWith('/')
+                                    ? undefined
+                                    : '_blank'
+                            "
+                            :aria-current="
+                                page.url.split(/[?#]/)[0] === toUrl(item.href)
+                                    ? 'page'
+                                    : undefined
+                            "
                             rel="noopener noreferrer"
                         >
                             <component :is="item.icon" />
                             <span>{{ item.title }}</span>
-                        </a>
+                        </component>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             </SidebarMenu>

@@ -1,25 +1,38 @@
-# Laravel + Vue Starter Kit
+# WP Hub
 
-## Introduction
+A workspace for connected WordPress websites, WooCommerce orders, Fluent Forms submissions, customer records, document fulfilment, marketing, and Google reporting.
 
-Our Vue starter kit provides a robust, modern starting point for building Laravel applications with a Vue frontend using [Inertia](https://inertiajs.com).
+## Documentation
 
-Inertia allows you to build modern, single-page Vue applications using classic server-side routing and controllers. This lets you enjoy the frontend power of Vue combined with the incredible backend productivity of Laravel and lightning-fast Vite compilation.
+Sign in and open **Documentation** in the sidebar (`/documentation`) for searchable, step-by-step guides. Use **Download guide** to save both guides as Markdown for onboarding or handover.
 
-This Vue starter kit utilizes Vue 3 and the Composition API, TypeScript, Tailwind, and the [shadcn-vue](https://www.shadcn-vue.com) component library.
+- [User guide](docs/USER_GUIDE.md): getting started, every main feature, daily workflows, and troubleshooting.
+- [Owner and handover guide](docs/OWNER_GUIDE.md): installation, integrations, background processing, deployments, recovery, and transfer planning.
+- [Document email engineering notes](docs/email-documents.md): Gmail integration, snapshots, optional open tracking, and session troubleshooting.
 
-## Official Documentation
+## Features
 
-Documentation for all Laravel starter kits can be found on the [Laravel website](https://laravel.com/docs/starter-kits).
+- Dashboard, order search including transaction IDs, inline status updates, and an order work queue.
+- Website connection settings, WooCommerce/Fluent Forms webhooks, fallback imports, and webhook recovery.
+- Structured submission details, customer views, WhatsApp links, and customer CSV exports.
+- Reviewed Gmail document emails with PDF uploads, sender aliases, history, and optional open detection.
+- Brevo marketing audiences by website and source, branded templates, reviewed campaigns, and provider event reporting.
+- Business analytics, GA4/Search Console reports, SEO opportunities, alerts, notifications, and action history.
 
-## Contributing
+## Development
 
-Thank you for considering contributing to our starter kit! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Laravel 12, PHP 8.2+, Vue 3, TypeScript, Inertia, Tailwind CSS, and Vite. Install locked dependencies with `composer install` and `npm ci`. Follow the [installation guide](docs/OWNER_GUIDE.md#installation-and-environment) to configure a separate environment, database, application key, and integrations before running the app.
 
-## Code of Conduct
+```sh
+php artisan test
+npm run test:frontend
+npm run build:ssr
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Use synthetic records and fake provider responses in tests. Do not send customer emails as a deployment check. See `routes/console.php` and `config/queue.php` for scheduled and background work.
 
-## License
+## Maintaining the guide
 
-The Laravel + Vue starter kit is open-sourced software licensed under the MIT license.
+The in-app documentation reads `docs/USER_GUIDE.md` and `docs/OWNER_GUIDE.md`; level-two headings become chapters. Update the guide alongside feature changes. Never put credentials, customer data, or private environment values in documentation.
+
+This application builds on the Laravel Vue starter kit. Preserve the repository's applicable license notices and review third-party dependency and asset licenses when distributing it.

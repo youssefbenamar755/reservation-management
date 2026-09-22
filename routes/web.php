@@ -28,6 +28,7 @@ Route::get('dashboard', DashboardController::class)
 
 require __DIR__.'/settings.php';
 require __DIR__.'/marketing.php';
+require __DIR__.'/documentation.php';
 
 
 Route::middleware(['auth'])->group(function () {
