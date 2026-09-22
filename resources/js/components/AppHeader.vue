@@ -130,12 +130,12 @@ const mainNavItems: NavItem[] = [
 const rightNavItems: NavItem[] = [
     {
         title: 'Repository',
-        href: 'https://github.com/laravel/vue-starter-kit',
+        href: 'https://github.com/youssefbenamar755/reservation-management',
         icon: Folder,
     },
     {
         title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
+        href: '/documentation',
         icon: BookOpen,
     },
 ];
@@ -190,7 +190,11 @@ const rightNavItems: NavItem[] = [
                                         v-for="item in rightNavItems"
                                         :key="item.title"
                                         :href="toUrl(item.href)"
-                                        target="_blank"
+                                        :target="
+                                            toUrl(item.href).startsWith('/')
+                                                ? undefined
+                                                : '_blank'
+                                        "
                                         rel="noopener noreferrer"
                                         class="flex items-center space-x-2 text-sm font-medium"
                                     >
@@ -274,7 +278,13 @@ const rightNavItems: NavItem[] = [
                                             >
                                                 <a
                                                     :href="toUrl(item.href)"
-                                                    target="_blank"
+                                                    :target="
+                                                        toUrl(
+                                                            item.href,
+                                                        ).startsWith('/')
+                                                            ? undefined
+                                                            : '_blank'
+                                                    "
                                                     rel="noopener noreferrer"
                                                 >
                                                     <span class="sr-only">{{
