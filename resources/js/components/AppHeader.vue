@@ -190,11 +190,7 @@ const rightNavItems: NavItem[] = [
                                         v-for="item in rightNavItems"
                                         :key="item.title"
                                         :href="toUrl(item.href)"
-                                        :target="
-                                            toUrl(item.href).startsWith('/')
-                                                ? undefined
-                                                : '_blank'
-                                        "
+                                        target="_blank"
                                         rel="noopener noreferrer"
                                         class="flex items-center space-x-2 text-sm font-medium"
                                     >
@@ -278,13 +274,7 @@ const rightNavItems: NavItem[] = [
                                             >
                                                 <a
                                                     :href="toUrl(item.href)"
-                                                    :target="
-                                                        toUrl(
-                                                            item.href,
-                                                        ).startsWith('/')
-                                                            ? undefined
-                                                            : '_blank'
-                                                    "
+                                                    target="_blank"
                                                     rel="noopener noreferrer"
                                                 >
                                                     <span class="sr-only">{{

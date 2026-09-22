@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AppLayout from '@/layouts/AppLayout.vue';
 import { Head } from '@inertiajs/vue3';
 import {
     ArrowDownToLine,
@@ -77,10 +76,21 @@ onUnmounted(() => {
     <Head title="WP Hub documentation"
         ><meta name="robots" content="noindex, nofollow"
     /></Head>
-    <AppLayout
-        :breadcrumbs="[{ title: 'Documentation', href: '/documentation' }]"
-    >
+    <main class="min-h-screen bg-muted/30 text-foreground">
         <div class="mx-auto w-full max-w-7xl space-y-7 p-4 sm:p-6 lg:p-8">
+            <nav
+                aria-label="Documentation home"
+                class="flex items-center justify-between gap-4 text-sm"
+            >
+                <a href="/documentation" class="font-semibold"
+                    >WP Hub Documentation</a
+                >
+                <a
+                    href="/dashboard"
+                    class="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                    ><ArrowLeft class="size-4" />Back to WP Hub</a
+                >
+            </nav>
             <header
                 class="flex flex-wrap items-start justify-between gap-5 rounded-2xl border bg-card p-6 sm:p-8"
             >
@@ -140,7 +150,8 @@ onUnmounted(() => {
                         role="status"
                         class="mt-2 text-xs text-muted-foreground"
                     >
-                        {{ matches.length }} matching chapters
+                        {{ matches.length }} matching
+                        {{ matches.length === 1 ? 'chapter' : 'chapters' }}
                     </p>
                     <nav
                         aria-label="Guide chapters"
@@ -267,7 +278,7 @@ onUnmounted(() => {
                 </div>
             </div>
         </div>
-    </AppLayout>
+    </main>
 </template>
 
 <style scoped>
