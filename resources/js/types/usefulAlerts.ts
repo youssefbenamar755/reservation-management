@@ -1,6 +1,7 @@
 export type UsefulAlertKind =
     | 'webhook_failed'
     | 'webhook_stalled'
+    | 'webhook_connection'
     | 'email_attention'
     | 'processing_aged';
 export type UsefulAlertStatus = 'active' | 'snoozed' | 'resolved';

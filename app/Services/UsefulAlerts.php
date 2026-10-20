@@ -14,7 +14,7 @@ use Throwable;
 
 class UsefulAlerts
 {
-    public const KINDS = ['webhook_failed', 'webhook_stalled', 'email_attention', 'processing_aged'];
+    public const KINDS = ['webhook_failed', 'webhook_stalled', 'webhook_connection', 'email_attention', 'processing_aged'];
 
     public function assertWebsite(User $actor, ?int $websiteId): void
     {
@@ -91,6 +91,12 @@ class UsefulAlerts
     private function detect(User $actor, array $websiteIds, CarbonImmutable $now): array
     {
         $counts = [];
+        foreach (DB::table('woo_webhook_checks')->join('websites', 'websites.id', '=', 'woo_webhook_checks.website_id')
+            ->whereIn('website_id', $websiteIds)->where('websites.status', 'active')
+            ->where(fn ($query) => $query->where('issues', '>', 0)->orWhere('checked_at', '<', $now->subHour()))
+            ->get(['website_id']) as $check) {
+            $counts[$check->website_id.':webhook_connection'] = 1;
+        }
         $webhooks = DB::table('webhook_events')->whereIn('website_id', $websiteIds)->where('signature_valid', true)
             ->whereIn('status', ['failed', 'queued'])
             ->selectRaw("website_id, SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
@@ -214,6 +220,9 @@ class UsefulAlerts
         $scope = '?website_id='.$websiteId;
 
         return match ($kind) {
+            'webhook_connection' => ['severity' => 'critical', 'title' => 'WooCommerce connection needs review',
+                'message' => 'An order webhook is inactive or missing, or its remote status could not be verified recently. Check WooCommerce delivery logs and webhook settings. Backup order reconciliation continues separately.',
+                'action_url' => '/website-health'.$scope, 'action_label' => 'Review website health'],
             'webhook_failed' => ['severity' => 'critical', 'title' => 'Webhooks need review',
                 'message' => $count.' verified webhook records failed to process. Review the failure before requesting a retry.',
                 'action_url' => '/website-health'.$scope.'&status=failed&range=all', 'action_label' => 'Review webhooks'],
