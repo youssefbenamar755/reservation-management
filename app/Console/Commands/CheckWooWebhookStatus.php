@@ -31,8 +31,7 @@ class CheckWooWebhookStatus extends Command
                 if ($response->successful() && is_array($hooks) && array_is_list($hooks)) {
                     $target = rtrim(config('app.url'), '/').'/api/v1/webhooks/woocommerce/'.$website->slug;
                     $ours = collect($hooks)->filter(fn ($hook) => ($hook['delivery_url'] ?? null) === $target);
-                    $issues = collect(['order.created', 'order.updated'])->filter(fn ($topic) =>
-                        ! $ours->contains(fn ($hook) => ($hook['topic'] ?? null) === $topic && ($hook['status'] ?? null) === 'active')
+                    $issues = collect(['order.created', 'order.updated'])->filter(fn ($topic) => ! $ours->contains(fn ($hook) => ($hook['topic'] ?? null) === $topic && ($hook['status'] ?? null) === 'active')
                     )->count();
                     // A truncated listing cannot prove a hook is missing.
                     $state = $issues && (int) $response->header('X-WP-TotalPages') > 1 ? 'check_failed' : ($issues ? 'inactive' : 'healthy');

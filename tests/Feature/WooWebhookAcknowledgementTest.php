@@ -2,16 +2,16 @@
 
 use App\Http\Controllers\Webhook\WooWebhookController;
 use App\Jobs\ProcessWooWebhookEvent;
+use App\Models\UsefulAlert;
 use App\Models\User;
-use App\Models\Website;
-use App\Models\WebhookEvent;
 use App\Models\WcOrder;
+use App\Models\WebhookEvent;
+use App\Models\Website;
+use App\Services\UsefulAlerts;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
-use App\Services\UsefulAlerts;
-use App\Models\UsefulAlert;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     config(['queue.default' => 'sync', 'broadcasting.default' => 'null']);
