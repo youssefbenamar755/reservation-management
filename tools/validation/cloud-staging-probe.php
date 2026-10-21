@@ -100,6 +100,7 @@ try {
     $diskConfig = config('filesystems.disks.documents_private', []);
     cpAssert(($diskConfig['driver'] ?? '') === 's3', 'Actual S3-compatible document disk required');
     cpAssert(($diskConfig['bucket'] ?? '') === $bucket, 'Document bucket does not match approved bucket');
+    cpAssert(empty($diskConfig['root']) && empty($diskConfig['prefix']), 'Unprefixed staging R2 disk required for exact unsigned-object probe');
     cpAssert(($diskConfig['visibility'] ?? 'private') !== 'public' && empty($diskConfig['url']), 'No public disk visibility or asset URL permitted');
     $endpoint = rtrim((string) ($diskConfig['endpoint'] ?? ''), '/');
     cpAssert((bool) preg_match('#^https://[a-z0-9]+(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com$#D', $endpoint), 'Expected HTTPS R2 endpoint required');
