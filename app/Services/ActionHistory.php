@@ -42,7 +42,7 @@ class ActionHistory
             }
             if ($filters['category'] !== 'all') {
                 $query->whereIn('kind', match ($filters['category']) {
-                    'orders' => ['order_status'], 'email' => ['email_send', 'email_record'],
+                    'orders' => ['order_status'], 'email' => ['email_send', 'email_record', 'email_review', 'email_sync', 'document_profile', 'document_brand_sync'],
                     'webhooks' => ['webhook_retry'], 'alerts' => ['alert_snoozed', 'alert_resumed'],
                 });
             }
@@ -92,6 +92,8 @@ class ActionHistory
         $details = is_array($details) ? $details : [];
         $title = match ($row->kind) {
             'order_status' => 'Order status requested', 'email_send' => 'Document email send', 'email_record' => 'Earlier email delivery',
+            'email_review' => 'Document email reviewed', 'email_sync' => 'Document order synchronization',
+            'document_profile' => 'Email & Documents settings saved', 'document_brand_sync' => 'Store acknowledgement branding published',
             'webhook_retry' => 'Webhook retry', 'alert_snoozed' => 'Alert snoozed', 'alert_resumed' => 'Alert resumed',
             default => 'Recorded action',
         };
@@ -110,6 +112,10 @@ class ActionHistory
                 'pending' => 'The send is in progress.',
                 default => 'The result is uncertain. Check Gmail Sent before sending again.',
             },
+            'email_review' => 'An operator recorded a manual Gmail Sent review. This does not trigger sending or automatic order completion.',
+            'email_sync' => $row->outcome === 'succeeded' ? 'The store confirmed completion after verifying the document receipt.' : 'The store update needs review or retry. No email was resent.',
+            'document_profile' => 'An operator saved a version of this website’s document workflow settings.',
+            'document_brand_sync' => 'The store confirmed the explicitly published acknowledgement configuration.',
             'webhook_retry' => match ($row->outcome) {
                 'succeeded' => 'The webhook was processed successfully.', 'failed' => 'The retry failed. Review the delivery details.',
                 'pending' => 'The retry is queued or processing.', default => 'The retry was skipped or existing data was kept.',

@@ -75,6 +75,12 @@ class GmailClient
 
     public function aliases(GmailConnection $connection): array
     {
+        if (app(DocumentValidationSafety::class)->capture()) {
+            // Fixture-only aliases are not evidence of real Google verification.
+            app(DocumentValidationSafety::class)->assertEnvironment();
+
+            return (array) $connection->aliases;
+        }
         try {
             $response = $this->request()->withToken($this->accessToken($connection))
                 ->get('https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs');
@@ -117,10 +123,21 @@ class GmailClient
         return $aliases;
     }
 
-    public function send(GmailConnection $connection, string $mime): string
+    public function send(GmailConnection $connection, string $mime, ?callable $beforeTransmit = null): string
     {
+        $safety = app(DocumentValidationSafety::class);
+        if ($safety->capture()) {
+            $safety->assertEnvironment();
+            $safety->assertRecipients($mime);
+            $beforeTransmit && $beforeTransmit();
+
+            return $safety->prepareMail($mime);
+        }
+        $safety->prepareMail($mime);
         // Deliberately no HTTP retries: Gmail has no idempotency key for messages.send.
         $token = $this->accessToken($connection);
+        // Refreshing OAuth may take time. Recheck the claimed delivery immediately before transmission.
+        $beforeTransmit && $beforeTransmit();
         try {
             $response = $this->request()->withToken($token)->post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', [
                 'raw' => rtrim(strtr(base64_encode($mime), '+/', '-_'), '='),

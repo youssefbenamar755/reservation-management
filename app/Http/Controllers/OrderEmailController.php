@@ -15,12 +15,15 @@ class OrderEmailController extends Controller
     {
         $this->authorize('view', $order);
 
-        return response()->json($composer->options($order, $request->user()))->header('Cache-Control', 'private, no-store');
+        return response()->json($composer->options($order, $request->user()) + [
+            'workflow' => app(\App\Services\BrandedDocumentDelivery::class)->context($order, $request->user()),
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function preview(Request $request, WcOrder $order, OrderEmailComposer $composer)
     {
         $this->authorize('update', $order);
+        $this->requireLegacyWorkflow($order);
         $values = $request->validate([
             'recipient' => ['required', 'string', 'email:rfc', 'max:254', 'not_regex:/[\r\n\x00]/'],
             'subject' => ['required', 'string', 'max:255', 'not_regex:/[\r\n\x00]/'],
@@ -47,6 +50,7 @@ class OrderEmailController extends Controller
     public function send(Request $request, WcOrder $order, OrderEmailDelivery $delivery, OrderEmailDeliveryService $service)
     {
         $this->authorize('update', $order);
+        $this->requireLegacyWorkflow($order);
         $this->scope($request, $order, $delivery);
         if ($request->input('confirmed') !== true) {
             throw ValidationException::withMessages(['confirmed' => 'Confirm this exact email preview before sending.']);
@@ -58,6 +62,13 @@ class OrderEmailController extends Controller
 
     private function scope(Request $request, WcOrder $order, OrderEmailDelivery $delivery): void
     {
-        abort_unless($delivery->wc_order_id === $order->id && $delivery->website_id === $order->website_id && $delivery->user_id === $request->user()->id, 404);
+        abort_unless(! $delivery->workflow && $delivery->wc_order_id === $order->id && $delivery->website_id === $order->website_id && $delivery->user_id === $request->user()->id, 404);
+    }
+
+    private function requireLegacyWorkflow(WcOrder $order): void
+    {
+        if (\App\Models\WebsiteDocumentProfile::where('website_id', $order->website_id)->where('workflow_enabled', true)->exists()) {
+            throw ValidationException::withMessages(['delivery' => 'This website uses the branded Email & Documents workflow. Reopen Email documents to approve its preview.']);
+        }
     }
 }

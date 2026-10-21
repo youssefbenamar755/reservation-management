@@ -114,6 +114,8 @@ function harness(t) {
                 };
             if (name.startsWith('@/components/ui/'))
                 return new Proxy({}, { get: () => wrapper });
+            if (name === '@/components/DocumentDeliveryComposer.vue')
+                return { default: wrapper };
             return require(name);
         },
     });

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DocumentDeliveryComposer from '@/components/DocumentDeliveryComposer.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -41,6 +42,10 @@ const emit = defineEmits<{
     closed: [event: { orderId: number }];
 }>();
 const open = ref(false);
+const workflowComposer = ref<InstanceType<
+    typeof DocumentDeliveryComposer
+> | null>(null);
+const workflowBusy = ref(false);
 const context = shallowRef<OrderEmailContext | null>(null);
 const draft = reactive({
     recipient: '',
@@ -305,7 +310,8 @@ async function loadContext() {
     }
 }
 function setOpen(value: boolean, reviewLatest = false) {
-    if (sending.value || disposed || open.value === value) return;
+    if (sending.value || workflowBusy.value || disposed || open.value === value)
+        return;
     open.value = value;
     if (value) {
         const contextRequest = loadContext();
@@ -315,6 +321,7 @@ function setOpen(value: boolean, reviewLatest = false) {
             if (
                 active(token, id) &&
                 !error.value &&
+                !context.value?.workflow?.enabled &&
                 ((step.value === 'preview' && preview.value) ||
                     (reviewLatest && context.value?.history.length))
             ) {
@@ -532,6 +539,7 @@ watch(
         invalidate();
         sendRequest?.abort();
         sending.value = false;
+        workflowBusy.value = false;
         context.value = null;
         preview.value = null;
         delivery.value = null;
@@ -556,8 +564,9 @@ defineExpose({
     open: (reviewLatest = false) => setOpen(true, reviewLatest),
     getState: () => ({
         open: open.value,
-        sending: sending.value,
+        sending: sending.value || workflowBusy.value,
         hasDraft:
+            Boolean(workflowComposer.value?.getState().hasDraft) ||
             sending.value ||
             sendUnconfirmed.value ||
             preparing.value ||
@@ -587,21 +596,25 @@ defineExpose({
     <Dialog :open="open" @update:open="setOpen">
         <DialogContent
             class="max-h-[90dvh] auto-rows-max overflow-y-auto sm:max-w-3xl"
-            :show-close-button="!sending"
+            :show-close-button="!sending && !workflowBusy"
             @escape-key-down="
                 (event) => {
-                    if (sending) event.preventDefault();
+                    if (sending || workflowBusy) event.preventDefault();
                 }
             "
             @interact-outside="
                 (event) => {
-                    if (sending) event.preventDefault();
+                    if (sending || workflowBusy) event.preventDefault();
                 }
             "
         >
             <DialogHeader>
                 <DialogTitle
-                    >Email documents
+                    >{{
+                        context?.workflow?.enabled
+                            ? 'Send documents & complete order'
+                            : 'Email documents'
+                    }}
                     <span
                         v-if="orderNumber"
                         class="font-normal text-muted-foreground"
@@ -609,9 +622,11 @@ defineExpose({
                     ></DialogTitle
                 >
                 <DialogDescription>{{
-                    step === 'compose'
-                        ? 'Attach the PDFs from your booking system, then review the complete email.'
-                        : 'Review the saved sender, recipient, message, and attachments before sending.'
+                    context?.workflow?.enabled
+                        ? 'Review approved PDFs, your website’s branding, and the order action before sending.'
+                        : step === 'compose'
+                          ? 'Attach the PDFs from your booking system, then review the complete email.'
+                          : 'Review the saved sender, recipient, message, and attachments before sending.'
                 }}</DialogDescription>
             </DialogHeader>
             <div
@@ -638,7 +653,23 @@ defineExpose({
                     >Retry loading</Button
                 >
             </div>
-            <template v-if="context && step === 'compose'">
+            <DocumentDeliveryComposer
+                v-if="context?.workflow?.enabled"
+                :key="orderId"
+                ref="workflowComposer"
+                :order-id="orderId"
+                :recipient="context.recipient"
+                :workflow="context.workflow"
+                :limits="context.limits"
+                @busy="workflowBusy = $event"
+                @settled="emit('settled', { orderId, action: $event })"
+                @close="setOpen(false)"
+            />
+            <template
+                v-if="
+                    context && !context.workflow?.enabled && step === 'compose'
+                "
+            >
                 <div
                     v-if="
                         preview &&
@@ -980,7 +1011,11 @@ defineExpose({
                     </ul>
                 </details>
             </template>
-            <template v-if="step === 'preview' && preview">
+            <template
+                v-if="
+                    !context?.workflow?.enabled && step === 'preview' && preview
+                "
+            >
                 <div
                     v-if="statusMessage"
                     class="rounded-lg border p-3 text-sm"

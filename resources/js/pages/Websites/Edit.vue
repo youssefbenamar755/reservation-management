@@ -14,7 +14,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Globe,
   ArrowLeft,
   Copy,
   Check,
@@ -460,6 +459,19 @@ function formatDate(dateString: string | null): string {
 
         <!-- Info Sidebar -->
         <div class="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Email &amp; Documents</CardTitle>
+              <CardDescription>
+                Configure this website’s branding, sender, templates and document delivery workflow.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button as-child variant="outline" class="w-full">
+                <Link :href="`/settings/email-documents?website_id=${website.id}`">Configure Email &amp; Documents</Link>
+              </Button>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle>Quick Info</CardTitle>
