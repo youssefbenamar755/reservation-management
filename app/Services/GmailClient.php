@@ -73,8 +73,9 @@ class GmailClient
         return $data;
     }
 
-    public function aliases(GmailConnection $connection): array
+    public function aliases(GmailConnection $connection, ?float $deadline = null): array
     {
+        $this->remainingSeconds($deadline);
         if (app(DocumentValidationSafety::class)->capture()) {
             // Fixture-only aliases are not evidence of real Google verification.
             app(DocumentValidationSafety::class)->assertEnvironment();
@@ -82,7 +83,9 @@ class GmailClient
             return (array) $connection->aliases;
         }
         try {
-            $response = $this->request()->withToken($this->accessToken($connection))
+            // Refresh consumes the same budget; construct the request only afterwards.
+            $token = $this->accessToken($connection, $deadline);
+            $response = $this->request($deadline)->withToken($token)
                 ->get('https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs');
         } catch (ConnectionException) {
             throw new GmailDeliveryException('Gmail sender addresses could not be checked. Please try again.');
@@ -123,25 +126,29 @@ class GmailClient
         return $aliases;
     }
 
-    public function send(GmailConnection $connection, string $mime, ?callable $beforeTransmit = null): string
+    public function send(GmailConnection $connection, string $mime, ?callable $beforeTransmit = null, ?float $deadline = null): string
     {
+        $this->remainingSeconds($deadline);
         $safety = app(DocumentValidationSafety::class);
         if ($safety->capture()) {
             $safety->assertEnvironment();
             $safety->assertRecipients($mime);
             $beforeTransmit && $beforeTransmit();
+            $this->remainingSeconds($deadline);
 
             return $safety->prepareMail($mime);
         }
         $safety->prepareMail($mime);
         // Deliberately no HTTP retries: Gmail has no idempotency key for messages.send.
-        $token = $this->accessToken($connection);
+        $token = $this->accessToken($connection, $deadline);
         // Refreshing OAuth may take time. Recheck the claimed delivery immediately before transmission.
         $beforeTransmit && $beforeTransmit();
+        $raw = rtrim(strtr(base64_encode($mime), '+/', '-_'), '=');
+        // Expiry here is definite: messages.send has not been attempted. Do not
+        // recheck after submission, when a confirmed Gmail ID must be preserved.
+        $request = $this->request($deadline)->withToken($token);
         try {
-            $response = $this->request()->withToken($token)->post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', [
-                'raw' => rtrim(strtr(base64_encode($mime), '+/', '-_'), '='),
-            ]);
+            $response = $request->post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', ['raw' => $raw]);
         } catch (ConnectionException) {
             throw new GmailDeliveryException('Gmail did not confirm the result. Check Gmail Sent before sending another email.', true);
         }
@@ -161,9 +168,11 @@ class GmailClient
         return $id;
     }
 
-    private function accessToken(GmailConnection $connection): string
+    private function accessToken(GmailConnection $connection, ?float $deadline = null): string
     {
-        return DB::transaction(function () use ($connection) {
+        $this->remainingSeconds($deadline);
+
+        return DB::transaction(function () use ($connection, $deadline) {
             $current = GmailConnection::whereKey($connection->id)->lockForUpdate()->first();
             if (! $this->isConnected($current) || $current->connection_key !== $connection->connection_key) {
                 throw new GmailDeliveryException('Connect Gmail in Email settings before sending documents.');
@@ -172,7 +181,7 @@ class GmailClient
                 return $current->access_token;
             }
             try {
-                $response = $this->request()->asForm()->post('https://oauth2.googleapis.com/token', [
+                $response = $this->request($deadline)->asForm()->post('https://oauth2.googleapis.com/token', [
                     ...$this->credentials(), 'refresh_token' => $current->refresh_token,
                     'grant_type' => 'refresh_token',
                 ]);
@@ -195,8 +204,26 @@ class GmailClient
         });
     }
 
-    private function request(): PendingRequest
+    private function request(?float $deadline = null): PendingRequest
     {
-        return Http::acceptJson()->connectTimeout(5)->timeout(20)->withOptions(['allow_redirects' => false]);
+        $remaining = $this->remainingSeconds($deadline);
+
+        return Http::acceptJson()->connectTimeout(min(5, $remaining))->timeout(min(20, $remaining))->withOptions(['allow_redirects' => false]);
+    }
+
+    private function remainingSeconds(?float $deadline): float
+    {
+        $remaining = $deadline === null ? 20.0 : $deadline - $this->monotonicSeconds();
+        // cURL rounds sub-millisecond timeouts down to zero (unlimited).
+        if ($remaining < 0.001) {
+            throw new GmailDeliveryException('Document validation took too long. No email was submitted. Please try again.');
+        }
+
+        return $remaining;
+    }
+
+    protected function monotonicSeconds(): float
+    {
+        return hrtime(true) / 1_000_000_000;
     }
 }

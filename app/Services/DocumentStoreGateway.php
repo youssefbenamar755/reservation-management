@@ -71,13 +71,13 @@ class DocumentStoreGateway
     }
 
     /** Fresh read-only eligibility evidence. Nothing is written to the store. */
-    public function checkOrder(WcOrder $order): array
+    public function checkOrder(WcOrder $order, ?float $deadline = null): array
     {
         $profile = WebsiteDocumentProfile::where('website_id', $order->website_id)->first();
         if (! $profile?->store_pairing_key) {
             throw new DocumentStoreException('A paired companion plugin is required to verify the current order revision.');
         }
-        $data = $this->call($order->website, 'GET', 'wphub-documents/orders/'.(int) $order->wp_order_id.'/eligibility', [], $profile->store_pairing_key);
+        $data = $this->call($order->website, 'GET', 'wphub-documents/orders/'.(int) $order->wp_order_id.'/eligibility', [], $profile->store_pairing_key, $deadline);
         if ((int) ($data['id'] ?? 0) !== (int) $order->wp_order_id || empty($data['date_modified_gmt'])
             || ! preg_match('/^[a-f0-9]{64}$/', (string) ($data['fulfillment_revision'] ?? ''))) {
             throw new DocumentStoreException('The store returned incomplete order information. Refresh and review the order.');
@@ -152,7 +152,7 @@ class DocumentStoreGateway
         return $identity ? $client->withHeaders(['X-WPHub-Website' => $identity]) : $client;
     }
 
-    private function call(Website $website, string $method, string $path, array $data = [], ?string $identity = null): array
+    private function call(Website $website, string $method, string $path, array $data = [], ?string $identity = null, ?float $deadline = null): array
     {
         $base = rtrim((string) $website->base_url, '/');
         $parts = parse_url($base);
@@ -164,15 +164,20 @@ class DocumentStoreGateway
             || (isset($parts['port']) && $parts['port'] !== 443)) {
             throw new DocumentStoreException('The registered store URL must be a public HTTPS address without credentials or a custom port.');
         }
+        $this->remainingSeconds($deadline);
         $addresses = $this->resolvePublicAddresses($host);
         if (! defined('CURLOPT_RESOLVE')) {
             throw new DocumentStoreException('The server requires the PHP cURL extension for a securely pinned store connection.');
         }
         $address = str_contains($addresses[0], ':') ? '['.$addresses[0].']' : $addresses[0];
+        $request = $this->client($website, $identity)
+            ->withOptions(['curl' => [CURLOPT_RESOLVE => [$host.':443:'.$address]], 'proxy' => '']);
+        // PHP's blocking resolver cannot be interrupted here. Include the time it
+        // consumed and stop before HTTP if it exhausted the caller's budget.
+        $remaining = $this->remainingSeconds($deadline);
+        $request->connectTimeout(min(5, $remaining))->timeout(min(20, $remaining));
         try {
-            $response = $this->client($website, $identity)
-                ->withOptions(['curl' => [CURLOPT_RESOLVE => [$host.':443:'.$address]], 'proxy' => ''])
-                ->send($method, $base.'/wp-json/wc/v3/'.$path, $data ? ['json' => $data] : []);
+            $response = $request->send($method, $base.'/wp-json/wc/v3/'.$path, $data ? ['json' => $data] : []);
         } catch (ConnectionException) {
             throw new DocumentStoreException('The store connection timed out or is unavailable. Review the order and retry synchronization; do not resend the email.');
         }
@@ -223,5 +228,20 @@ class DocumentStoreGateway
             static fn (array $record) => $record['ip'] ?? $record['ipv6'] ?? null,
             is_array($records) ? $records : [],
         ))));
+    }
+
+    private function remainingSeconds(?float $deadline): float
+    {
+        $remaining = $deadline === null ? 20.0 : $deadline - $this->monotonicSeconds();
+        if ($remaining < 0.001) {
+            throw new DocumentStoreException('Document validation took too long. No email was submitted. Please try again.');
+        }
+
+        return $remaining;
+    }
+
+    protected function monotonicSeconds(): float
+    {
+        return hrtime(true) / 1_000_000_000;
     }
 }

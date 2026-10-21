@@ -20,6 +20,8 @@ use Throwable;
 
 class BrandedDocumentDelivery
 {
+    private const NETWORK_BUDGET_SECONDS = 20;
+
     public function __construct(private GmailClient $gmail, private OrderDocumentStorage $storage) {}
 
     public function context(WcOrder $order, User $actor): array
@@ -48,11 +50,12 @@ class BrandedDocumentDelivery
 
     public function prepare(WcOrder $order, User $actor, array $values): OrderEmailDelivery
     {
+        $deadline = $this->monotonicSeconds() + self::NETWORK_BUDGET_SECONDS;
         Gate::forUser($actor)->authorize('update', $order);
         $profile = $this->profile($order);
         $mode = $values['mode'];
         $connection = $this->connection($profile, $order);
-        $sender = $this->verifiedSender($connection, $profile);
+        $sender = $this->verifiedSender($connection, $profile, $deadline);
         $ids = array_values(array_unique($values['document_ids']));
         $documents = OrderDocument::whereIn('id', $ids)->where('website_id', $order->website_id)->where('wc_order_id', $order->id)
             ->whereNotNull('approved_at')->where('customer_email', strtolower($order->customer_email ?? ''))->orderBy('id')->get();
@@ -72,7 +75,7 @@ class BrandedDocumentDelivery
             if ($required === [] || empty($values['fulfillment_confirmed']) || array_diff($required, $fulfilled)) {
                 throw ValidationException::withMessages(['fulfilled_services' => 'Confirm that every required service and document for this order is included. Use partial delivery if anything remains.']);
             }
-            $remote = app(DocumentStoreGateway::class)->checkOrder($order);
+            $remote = app(DocumentStoreGateway::class)->checkOrder($order, $deadline);
             $this->assertEligible($remote, $order);
         }
         $attachments = $documents->map->summary()->all();
@@ -140,6 +143,7 @@ class BrandedDocumentDelivery
 
     public function send(WcOrder $order, OrderEmailDelivery $delivery, User $actor): OrderEmailDelivery
     {
+        $deadline = $this->monotonicSeconds() + self::NETWORK_BUDGET_SECONDS;
         Gate::forUser($actor)->authorize('update', $order);
         [$current, $claimed] = DB::transaction(function () use ($order, $delivery, $actor) {
             $lockedOrder = WcOrder::whereKey($order->id)->lockForUpdate()->firstOrFail();
@@ -182,13 +186,13 @@ class BrandedDocumentDelivery
             if ($connection->id !== $current->gmail_connection_id || $connection->connection_key !== $current->connection_key) {
                 throw new GmailDeliveryException('The Gmail connection changed. Prepare a new preview.');
             }
-            $sender = $this->verifiedSender($connection, $profile);
+            $sender = $this->verifiedSender($connection, $profile, $deadline);
             if (strcasecmp($sender['email'], $current->snapshot['sender']['email']) !== 0) {
                 throw new GmailDeliveryException('The approved sender changed. Prepare a new preview.');
             }
             // Read-only store recheck before sending; completion rechecks again after sending.
             if ($current->document_mode === 'complete') {
-                $remote = app(DocumentStoreGateway::class)->checkOrder($order);
+                $remote = app(DocumentStoreGateway::class)->checkOrder($order, $deadline);
                 $this->assertEligible($remote, $order);
                 $expectedRevision = $current->snapshot['expected_fulfillment_revision'] ?? null;
                 if (($remote['modified_gmt'] ?? null) !== $current->snapshot['expected_modified_gmt']
@@ -210,7 +214,7 @@ class BrandedDocumentDelivery
                     // not an uncertain Gmail outcome that would require mailbox review.
                     throw new GmailDeliveryException('Send validation failed. Check configuration, access and approved documents before retrying.');
                 }
-            });
+            }, $deadline);
             if ($messageId === '') {
                 throw new GmailDeliveryException(OrderEmailDeliveryService::UNKNOWN, true);
             }
@@ -321,14 +325,19 @@ class BrandedDocumentDelivery
         return $connection;
     }
 
-    private function verifiedSender(GmailConnection $connection, WebsiteDocumentProfile $profile): array
+    private function verifiedSender(GmailConnection $connection, WebsiteDocumentProfile $profile, float $deadline): array
     {
-        $sender = app(OrderEmailComposer::class)->sender($this->gmail->aliases($connection), $profile->sender_email);
+        $sender = app(OrderEmailComposer::class)->sender($this->gmail->aliases($connection, $deadline), $profile->sender_email);
         if (! $sender) {
             throw new GmailDeliveryException('This website’s sender is not a verified Gmail alias. Check Email & Documents settings.');
         }
         $sender['name'] = $profile->sender_name;
 
         return $sender;
+    }
+
+    protected function monotonicSeconds(): float
+    {
+        return hrtime(true) / 1_000_000_000;
     }
 }
