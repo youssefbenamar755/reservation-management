@@ -29,20 +29,25 @@ manifest_json = json.dumps(manifest, indent=2) + '\n'
 (outputs / 'document-feature-files.json').write_text(manifest_json, encoding='utf-8')
 (release / 'changed-files.json').write_text(manifest_json, encoding='utf-8')
 
-notice = '''# Review package — not approved for deployment
+notice = '''# Staging review package — no production deployment approval
 
 Source snapshots scoped by changed-files.json, plus the validation report.
-Production has NOT been deployed, migrated, activated or sent customer mail.
-Local Git metadata predates the deployed application: reconcile these scoped
-changes against the then-current remote main before a release commit. Do not
-overlay the ZIP onto production. Pushing main can automatically deploy.
+Remote-base reconciliation is complete for the reviewed staging branch
+codex/email-documents-staging, tracked in draft pull request #42:
+https://github.com/youssefbenamar755/reservation-management/pull/42
+This snapshot is for staging review. It does not authorize merging or pushing
+main, production deployment or migration, live companion installation,
+activation or customer mail. Do not overlay the ZIP onto production; pushing
+main can automatically deploy. Recheck the current remote base before any
+later production release.
 
-Read docs/email-documents-release-runbook.md and RELEASE-REPORT.md. Per-site Gmail
-and Outlook checks, full staged HTTPS integration, configuration, private Cloud
-storage persistence/restore, workers and capacity remain approval/verification gates.
+Read docs/email-documents-release-runbook.md and RELEASE-REPORT.md for the
+current gate statuses, completed evidence, outstanding checks and approved
+staging scope. A prepared script or packaged source is not a passed runtime
+check, and staging approval does not authorize production activation.
 The separate companion ZIP contains runtime files only. Never install tests/real
 or validation fixture guards on a live store. No credentials or customer PDFs
-are included. Use the report's exact later approval scope before production work.
+are included. Obtain the report's specified later approvals before production work.
 '''
 review_zip = release / 'wphub-email-documents-review.zip'
 with zipfile.ZipFile(review_zip, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -65,7 +70,7 @@ with zipfile.ZipFile(review_zip) as archive:
     for entry in manifest:
         assert hashlib.sha256(archive.read('source/' + entry['file'])).hexdigest() == entry['sha256']
 
-artifacts = {'source_files': len(manifest), 'scope': 'review only; not approved for deployment', 'packages': [
+artifacts = {'source_files': len(manifest), 'scope': 'staging review only; no main or production deployment approval', 'packages': [
     {'path': str(file), 'bytes': file.stat().st_size, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest()}
     for file in [review_zip, plugin_zip]
 ]}

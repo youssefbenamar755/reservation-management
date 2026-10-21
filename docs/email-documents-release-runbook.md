@@ -10,7 +10,7 @@ This is a preparation package. No command in this guide has been executed agains
 - **Real integration:** only a running WordPress/WooCommerce test-store result with recorded versions qualifies. The companion's PHP stub harness alone does not. Refer to the separate release report and store evidence for actual execution results.
 - **Actual email checkpoint:** four fictional EN/FR document-delivery tests were accepted by Gmail for the exact two approved recipients. Gmail receipt/PDF opening is owner-confirmed; Outlook web receipt and all three PDFs were directly inspected. This does not establish every brand, acknowledgement, client, images-blocked view or received-byte hash. See the release report for the separate evidence.
 - **Local storage/worker checkpoint:** a fresh SQLite/local-filesystem fixture verifies private downloads, real Laravel worker restart, sync-only recovery and local backup/restore. The store gateway in this probe is simulated. This does not establish Cloud deployment or S3/R2 persistence.
-- **Pending:** remaining brand/client/received-byte checks, production-like private object-storage persistence across deployment and managed-worker restart, hosted restore/capacity checks, and each real website's configuration and notification inventory.
+- **Current release gates:** use `RELEASE-REPORT.md` for the latest status of brand/client/received-byte checks, private Cloud storage persistence, managed-worker restart, hosted restore/capacity and each real website's configuration/notification inventory. Prepared probes, local results and approved infrastructure are separate from recorded Cloud execution results.
 
 ## Reproduce safe local capture
 
@@ -99,7 +99,7 @@ php artisan migrate --force
 
 Before activation, upload a fictional approved PDF through the actual staged application and record its database ID, storage key, byte length and SHA-256. Download through an authorized session and verify the same hash. Check the same URL while logged out and as another website owner; access must fail. A guessed public `/storage/...` path and bucket object's anonymous URL must also fail. Do not publish a signed URL to customers as a substitute.
 
-Redeploy the staged application, restart the managed queue worker, and read the same approved document through a fresh application instance; verify unchanged hash, approval/version metadata and completed delivery history. Repeat after restoring the staging backup to an isolated target. This proves deployment/worker and restore persistence. A local file surviving a PHP process restart or a unit test using `Storage::fake()` does not establish these hosting guarantees. These actual Cloud persistence/restore checks remain pending until an approved staging bucket/worker exists.
+Redeploy the staged application, restart the managed queue worker, and read the same approved document through a fresh application instance; verify unchanged hash, approval/version metadata and completed delivery history. Repeat after restoring the staging backup to an isolated target. This proves deployment/worker and restore persistence. A local file surviving a PHP process restart or a unit test using `Storage::fake()` does not establish these hosting guarantees. Consult `RELEASE-REPORT.md` and the corresponding Cloud command evidence for current results; creating the approved staging bucket/worker alone does not pass these checks.
 
 ## Reproduce the isolated local storage/worker drill
 
@@ -145,6 +145,22 @@ APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-staging-pro
 ```
 
 Capture the actual Cloud worker process identity, issue `php artisan queue:restart` only in this isolated staging environment, and capture the new managed process identity. Repeat enqueue/verify with `--worker-label=after-restart`; labels `after-redeploy` and `after-restore` are also available. Keep the Cloud process/log evidence next to the probe output. This establishes basic managed-worker consumption and restart when observed; it does not establish a long-running provider request, enforced timeout, graceful in-flight completion or successful WooCommerce fulfillment.
+
+## Approved Cloud CLI capacity probe
+
+Run `tools/validation/cloud-capacity-probe.php` serially after the storage fixture exists and while the staging queue is quiet. It uses the same strict environment, app URL, schema, capture-only and private R2 guards, also requires Linux, and targets only fictional order **900002**. The original one-PDF persistence fixture on order 900001 remains intact. Supply the actual approved backend bucket name rather than its display name.
+
+```sh
+APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-capacity-probe.php --expected-app-url=https://reservation-management-documents-staging-o3nliw.laravel.cloud --expected-bucket=ACTUAL_APPROVED_BUCKET
+```
+
+On its first run, the probe creates two genuine one-page PDFs of exactly **5 MiB each**, approves/uploads them through `OrderDocumentStorage`, reads their actual R2 bytes, builds MIME with both attachments, and saves it once in a new prepared, unsent delivery using the real encrypted model cast. It verifies encrypted readback and Gmail's base64url JSON serialization, then requires the application to reject a **10 MiB + 1 KiB** aggregate without adding document rows. No Gmail request, store HTTP or queue dispatch occurs. Only `.invalid` fixture addresses and a disconnected token-free Gmail metadata row are used.
+
+The saved marker makes repeat runs reuse the same document IDs and immutable MIME. They do not reupload or rewrite the delivery. An unmarked partial state stops for inspection instead of creating another set; there is no object deletion/reset operation. Run serially because its unchanged queue-count assertion is deliberately incompatible with other concurrent queue work.
+
+Save the safe JSON output with its `newly_uploaded` flag. It records hashes, MIME/encrypted-MIME/JSON byte sizes, elapsed work, PHP allocated-memory peak, Linux `/proc/self/status` RSS/high-water mark when available, and effective CLI PHP limits/MySQL packet size. Distinguish the first upload/construction run from repeat readback runs. Local syntax/refusal checks and strict PDF parsing only validate probe preparation; use the release report for actual Cloud results.
+
+This is a **single-process Linux CLI/MySQL/R2 diagnostic**. It does not exercise an HTTP multipart request, browser upload, PHP-FPM limits, web-server request timeout, simultaneous requests, app-plus-worker contention, Gmail/network delay, process-kill timeout or graceful in-flight completion. Retained diagnostic buffers can exceed normal request memory. CLI `upload_max_filesize`, `post_max_size` and timing values are observations, not proof that the browser path accepts 10 MiB or that production is adequately sized. HTTP/concurrency and slow-provider checks remain separate gates even when this probe passes.
 
 ## Emergency disable and safe rollback
 
