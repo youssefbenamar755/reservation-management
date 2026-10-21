@@ -28,6 +28,13 @@ Schedule::command(SyncWooCommerceOrders::class)
 
 Schedule::command(PruneOrderEmailPreviews::class)->daily()->withoutOverlapping(10);
 
+// Recover interrupted work after the durable webhook receipt was acknowledged.
+Schedule::command(\App\Console\Commands\RecoverWooWebhookEvents::class)
+    ->everyMinute()->withoutOverlapping(10)->runInBackground();
+
+Schedule::command(\App\Console\Commands\CheckWooWebhookStatus::class)
+    ->everyFifteenMinutes()->withoutOverlapping(15)->runInBackground();
+
 // Cloud's scheduler drains this dedicated queue without a permanently running worker.
 // max-time is checked between jobs; retry_after exceeds the individual job timeout.
 Schedule::command('queue:work traffic --queue=traffic --stop-when-empty --max-jobs=4 --max-time=50 --timeout=180 --tries=1 --sleep=1')

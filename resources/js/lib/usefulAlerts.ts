@@ -12,6 +12,11 @@ export const usefulAlertKinds: Array<{
     countLabel: string;
 }> = [
     {
+        key: 'webhook_connection',
+        label: 'WooCommerce connection',
+        countLabel: 'connection checks needing review',
+    },
+    {
         key: 'webhook_failed',
         label: 'Failed webhooks',
         countLabel: 'failed webhook records',

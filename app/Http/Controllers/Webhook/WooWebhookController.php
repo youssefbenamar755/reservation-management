@@ -58,7 +58,7 @@ class WooWebhookController extends Controller
         if (!is_array($parsedPayload)) {
             Log::error('WooCommerce webhook: failed to parse JSON body', [
                 'website_id' => $website->id,
-                'raw_body'   => substr($rawBody, 0, 500),
+                'body_bytes' => strlen($rawBody),
             ]);
             // Return 200 anyway so WooCommerce doesn't keep retrying a malformed payload
             return response()->json(['ok' => false, 'error' => 'Invalid JSON payload']);
@@ -75,8 +75,9 @@ class WooWebhookController extends Controller
             'received_at'    => now(),
         ]);
 
-        // Dispatch job to process the webhook asynchronously (quick 200 OK back to WooCommerce)
-        ProcessWooWebhookEvent::dispatch($event->id);
+        // Persist first, acknowledge, then import, even with the sync queue.
+        // Scheduled recovery handles a process killed after receipt.
+        ProcessWooWebhookEvent::dispatchAfterResponse($event->id);
 
         // Track last webhook time (useful for monitoring)
         $website->update([
