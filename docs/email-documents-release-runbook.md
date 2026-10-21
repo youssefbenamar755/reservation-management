@@ -118,6 +118,34 @@ The local AWS SDK wire probe serializes a `private` ACL header for the applicati
 
 Only `results.json`, `pdf-integrity.json` and reviewed PNGs are shareable evidence. Do not package `state.private.json`, fixture/backup databases, logs or private document directories. The harness applies narrow, process-local workarounds for this Windows sandbox's false `is_readable()` metadata result; actual file reads and fileinfo MIME detection still execute. No framework/vendor source is changed.
 
+## Approved Cloud staging storage probe
+
+`tools/validation/cloud-staging-probe.php` is a portable acceptance probe for the fresh approved Cloud environment. Its preparation and local refusal checks do not count as a Cloud pass. The operator supplies the exact observed staging URL and actual backend bucket name (Cloud's display name can differ). Never print the full filesystem configuration, which contains credentials.
+
+The probe refuses unless both the process and cached application environment are `staging`, the app URL matches, debug is off, validation transport is `capture`, the store allowlist is empty, MySQL's selected schema is exactly `documents_staging`, and the document disk is the private `documents_private` R2 disk with the expected bucket. Native PHP mail must be disabled. It blocks Laravel HTTP and does not send messages or call WooCommerce. Its only external network operations are the selected R2 bucket's real authenticated storage I/O and an unsigned object GET with redirects disabled. Only the explicit worker phase enqueues the narrowly described job below.
+
+Run `seed` before importing any business fixtures; it requires no existing users, websites, jobs, orders, submissions, document deliveries or Gmail connections. It creates only a paused `.invalid` website, fictional users/orders/PDF, and a disconnected, token-free Gmail metadata row needed for the encrypted delivery snapshot's foreign key. No Gmail consent or connected sender is needed. Rerunning `seed` on a completed fixture performs verification without creating duplicates. Fixture rows are transactional; an object written before a later failure may remain private for inspection. The probe has no destructive reset option.
+
+```sh
+APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-staging-probe.php --phase=seed --expected-app-url=https://reservation-management-documents-staging-o3nliw.laravel.cloud --expected-bucket=ACTUAL_APPROVED_BUCKET
+APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-staging-probe.php --phase=verify --expected-app-url=https://reservation-management-documents-staging-o3nliw.laravel.cloud --expected-bucket=ACTUAL_APPROVED_BUCKET
+```
+
+Save only the safe JSON output. A passing run confirms actual private upload/read, approved PDF hash/version, encrypted snapshot/MIME reads, owner/anonymous/other-owner/cross-order route behavior, private cache headers, and unsigned R2 access denial. Application routes are exercised through the real HTTP kernel in-process; actual edge/session behavior and bucket-wide public/CDN visibility still require their own checks.
+
+Repeat `verify` after an approved redeploy/managed worker restart and again after attaching a restored copy of the staging database with its matching `APP_KEY`. Compare the same document ID, SHA-256, approval version and encrypted snapshot ciphertext hash across all outputs. If a separate restored app is used, pass that approved app's exact observed URL; keep the selected schema named `documents_staging`. Record the actual platform deployment/restore operation alongside the output. One passing probe run does not prove a redeploy, independent backup, worker lifecycle or capacity.
+
+The optional `--phase=backup-copy` writes and verifies one second private prefix copy in the same bucket and preserves its manifest for subsequent `verify` runs. This is useful for object-copy integrity only. It does not exercise an independent storage backup, replace MySQL backups or provide protection from bucket loss. Preserve or export object backups separately under the approved staging resource plan. The probe intentionally never deletes or overwrites the approved original PDF.
+
+For the approved managed worker, run `worker-enqueue`, then `worker-verify` with the same bounded label. Each label can enqueue at most one real `SyncDocumentCompletion` job; its database ID, payload UUID and failed-job baseline are saved atomically with the queue insert. The fixture remains a **prepared partial** delivery, which the production synchronization service returns without claiming, sending or contacting a store. Verification requires the job to be gone, no new failure records, and unchanged send/sync attempts and order/delivery state. No queue mocks, extra job classes or validation allowlist changes are used.
+
+```sh
+APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-staging-probe.php --phase=worker-enqueue --worker-label=initial --expected-app-url=https://reservation-management-documents-staging-o3nliw.laravel.cloud --expected-bucket=ACTUAL_APPROVED_BUCKET
+APP_ENV=staging php -d disable_functions=mail tools/validation/cloud-staging-probe.php --phase=worker-verify --worker-label=initial --expected-app-url=https://reservation-management-documents-staging-o3nliw.laravel.cloud --expected-bucket=ACTUAL_APPROVED_BUCKET
+```
+
+Capture the actual Cloud worker process identity, issue `php artisan queue:restart` only in this isolated staging environment, and capture the new managed process identity. Repeat enqueue/verify with `--worker-label=after-restart`; labels `after-redeploy` and `after-restore` are also available. Keep the Cloud process/log evidence next to the probe output. This establishes basic managed-worker consumption and restart when observed; it does not establish a long-running provider request, enforced timeout, graceful in-flight completion or successful WooCommerce fulfillment.
+
 ## Emergency disable and safe rollback
 
 Use **Disable this workflow** in the affected website's Email & Documents settings. This dedicated action updates only the saved enabled flag and configuration version, under the website/profile lock, and records an audit event. It does not require valid templates, a working Gmail connection or a still-authorized sender assignment. The button remains available with unsaved edits; those edits are preserved locally and are not published by disabling. If another operator changed the saved configuration, the older draft keeps its stale version and cannot silently overwrite the newer settings; reload before applying it.
