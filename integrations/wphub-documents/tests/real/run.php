@@ -17,12 +17,23 @@ define('WP_DISABLE_FATAL_ERROR_HANDLER', true);
 $_SERVER['HTTP_HOST'] = '127.0.0.1';
 $_SERVER['REQUEST_URI'] = '/';
 require $fixture.'/wordpress/wp-load.php';
-if (DB_HOST !== '127.0.0.1:33177' || DB_NAME !== 'wphub_fixture_'.$mode) {
+global $wpdb;
+$expectedDataDirectory = strtolower(rtrim(str_replace('\\', '/', $fixture), '/').'/data/');
+$actualDataDirectory = strtolower(rtrim(str_replace('\\', '/', (string) $wpdb->get_var('SELECT @@datadir')), '/').'/');
+$fixtureOrigins = ['http://127.0.0.1', 'https://fixture.example.invalid'];
+if (DB_HOST !== '127.0.0.1:33177' || DB_NAME !== 'wphub_fixture_'.$mode
+    || $actualDataDirectory !== $expectedDataDirectory
+    || ! in_array(get_option('home'), $fixtureOrigins, true)
+    || ! in_array(get_option('siteurl'), $fixtureOrigins, true)) {
     throw new RuntimeException('Fixture database guard rejected an unexpected database.');
+}
+if (getenv('WPHUB_FIXTURE_EMAIL_IMPROVEMENTS') === 'yes') {
+    update_option('woocommerce_feature_email_improvements_enabled', 'yes');
 }
 wp_set_current_user(1);
 WC_Install::install();
 WC_Install::create_roles();
+wp_roles()->for_site();
 WC_Install::create_tables();
 wc_get_container()->get(\Automattic\WooCommerce\Internal\DataStores\Orders\DataSynchronizer::class)->create_database_tables();
 WC()->mailer();
@@ -80,8 +91,8 @@ function proof(WC_Order $order): array {
 
 try {
     global $wpdb;
-    verify(get_option('home') === 'http://127.0.0.1', 'Site origin is loopback only');
-    verify(str_contains(str_replace('\\', '/', $wpdb->get_var('SELECT @@datadir')), '/woo-integration/data/'), 'Database is the new isolated data directory');
+    verify(in_array(get_option('home'), $fixtureOrigins, true), 'Site origin is explicitly fictional and no HTTP server is started');
+    verify($actualDataDirectory === $expectedDataDirectory, 'Database is the exact explicitly selected new isolated data directory');
     verify(! function_exists('mail'), 'PHP mail function is disabled as a transport backstop');
     verify(DISABLE_WP_CRON && get_option('active_plugins') === ['woocommerce/woocommerce.php', 'wphub-documents/wphub-documents.php'], 'Only the two explicitly installed test plugins are active and automatic cron is disabled');
     verify(count(WC()->payment_gateways()->payment_gateways()) === 0, 'All payment gateways are disabled');
@@ -249,6 +260,7 @@ try {
     unset($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']);
     $result = ['passed' => true, 'mode' => $mode, 'wordpress' => get_bloginfo('version'), 'woocommerce' => WC_VERSION,
         'php' => PHP_VERSION, 'database' => $wpdb->get_var('SELECT VERSION()'), 'hpos_compatibility_sync' => false,
+        'email_improvements' => get_option('woocommerce_feature_email_improvements_enabled'),
         'transport' => 'capture only', 'real_external_email_sent' => false, 'network_requests_blocked' => count($GLOBALS['wphub_fixture_http']), 'checks' => $checks];
 } catch (Throwable $exception) {
     $result = ['passed' => false, 'mode' => $mode, 'error' => $exception->getMessage(), 'trace' => $exception->getTraceAsString(), 'checks' => $checks];

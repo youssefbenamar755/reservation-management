@@ -544,11 +544,26 @@ final class WPHub_Documents
         $color = sanitize_hex_color($config['primary_color'] ?? '');
         $background = sanitize_hex_color($config['background_color'] ?? '');
         $text = sanitize_hex_color($config['text_color'] ?? '');
+        $headerText = '#ffffff';
+        if ($color) {
+            $hex = ltrim($color, '#');
+            $hex = strlen($hex) === 3 ? preg_replace('/(.)/', '$1$1', $hex) : $hex;
+            $channels = array_map(static function ($channel) {
+                $value = hexdec($channel) / 255;
+
+                return $value <= 0.04045 ? $value / 12.92 : (($value + 0.055) / 1.055) ** 2.4;
+            }, str_split($hex, 2));
+            $luminance = $channels[0] * 0.2126 + $channels[1] * 0.7152 + $channels[2] * 0.0722;
+            // Choose the stronger WCAG contrast. Woo's newer templates otherwise
+            // retain their dark heading text when a branded dark header is used.
+            $headerText = ($luminance + 0.05) / 0.05 >= 1.05 / ($luminance + 0.05) ? '#000000' : '#ffffff';
+        }
 
         // Appended after WooCommerce's defaults, and only for our two acknowledgement
         // types. Its classic mobile stylesheet otherwise shrinks the body to 10px.
         return $css.'#body_content_inner { font-size:16px; line-height:1.6; }'
             .($color ? '#template_header { background-color:'.$color.'; }'
+                .'#template_header, #template_header h1, #template_header h1 a { color:'.$headerText.'; }'
                 .'#body_content_inner h2, #body_content_inner h3, #body_content_inner a, #body_content_inner .link { color:'.$color.'; }' : '')
             .($background ? '#wrapper { background-color:'.$background.'; }' : '')
             .($text ? '#body_content_inner, #body_content_inner .td, #body_content_inner .address { color:'.$text.'; }' : '')

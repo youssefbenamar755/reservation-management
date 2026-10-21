@@ -9,13 +9,32 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 repo = Path(__file__).resolve().parents[2]
 parent = Path(sys.argv[1]).resolve()
 source = parent / 'woo-integration'
+wordpress_package = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else source/'wordpress-6.8.3.zip'
+woocommerce_package = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else source/'woocommerce.10.3.0.zip'
+for package in [wordpress_package, woocommerce_package]:
+    if not package.is_file() or not package.is_relative_to(parent):
+        raise RuntimeError('Only an existing private output package may seed a new fixture')
 root = parent / ('wphub-network-' + secrets.token_hex(8))
 root.mkdir()
 (root/'FICTIONAL-ONLY').write_text('New isolated network fixture. Capture only. No production data.\n',encoding='utf-8')
-with zipfile.ZipFile(source/'wordpress-6.8.3.zip') as archive:
+with zipfile.ZipFile(wordpress_package) as archive:
+    if any(Path(name).is_absolute() or '..' in Path(name).parts for name in archive.namelist()):
+        raise RuntimeError('Unsafe WordPress archive member')
     archive.extractall(root)
-with zipfile.ZipFile(source/'woocommerce.10.3.0.zip') as archive:
+with zipfile.ZipFile(woocommerce_package) as archive:
+    if any(Path(name).is_absolute() or '..' in Path(name).parts for name in archive.namelist()):
+        raise RuntimeError('Unsafe WooCommerce archive member')
     archive.extractall(root/'wordpress/wp-content/plugins')
+# Optional official French catalogues are scoped to the explicitly selected new versions.
+if wordpress_package.name == 'wordpress-7.1.3.zip' and woocommerce_package.name == 'woocommerce.11.2.1.zip':
+    for filename, destination in [('wordpress-7.1.3-fr_FR.zip', 'wordpress/wp-content/languages'),
+                                  ('woocommerce.11.2.1-fr_FR.zip', 'wordpress/wp-content/languages/plugins')]:
+        translation = source / filename
+        if translation.exists():
+            with zipfile.ZipFile(translation) as archive:
+                if any(Path(name).is_absolute() or '..' in Path(name).parts for name in archive.namelist()):
+                    raise RuntimeError('Unsafe translation archive member')
+                archive.extractall(root / destination)
 (root/'wordpress/wp-content/mu-plugins').mkdir(exist_ok=True)
 shutil.copyfile(repo/'integrations/wphub-documents/tests/real/isolation.php', root/'wordpress/wp-content/mu-plugins/isolation.php')
 config = (source/'wordpress/wp-config.php').read_text(encoding='utf-8')

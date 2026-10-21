@@ -178,6 +178,14 @@ $brandedCss = WPHub_Documents::styles($originalCss, $email);
 assert_contract(str_ends_with($brandedCss, '@media screen and (max-width: 600px) { #body_content_inner { font-size:16px !important; line-height:1.6 !important; } }'), 'Acknowledgement mobile body overrides the stock tiny font after its media query');
 assert_contract(str_contains($brandedCss, '#body_content_inner h2, #body_content_inner h3, #body_content_inner a, #body_content_inner .link { color:#123456; }'), 'Acknowledgement headings and links use configured brand color');
 assert_contract(str_contains($brandedCss, '#body_content_inner, #body_content_inner .td, #body_content_inner .address { color:#222222; }'), 'Acknowledgement order details use configured readable text color');
+foreach (['#334155' => '#ffffff', '#ffffff' => '#000000', '#00cc61' => '#000000', '#fff' => '#000000', '#777777' => '#000000'] as $headerColor => $expectedText) {
+    $options[WPHub_Documents::OPTION]['primary_color'] = $headerColor;
+    foreach (['customer_processing_order', 'customer_on_hold_order'] as $acknowledgementId) {
+        $css = WPHub_Documents::styles($originalCss, (object) ['id' => $acknowledgementId]);
+        assert_contract(str_contains($css, '#template_header, #template_header h1, #template_header h1 a { color:'.$expectedText.'; }'), $acknowledgementId.' heading chooses stronger contrast for '.$headerColor);
+    }
+}
+$options[WPHub_Documents::OPTION]['primary_color'] = '#123456';
 foreach (['customer_completed_order', 'customer_refunded_order', 'cancelled_order', 'new_order'] as $emailId) {
     assert_contract(WPHub_Documents::styles($originalCss, (object) ['id' => $emailId]) === $originalCss, $emailId.' styling remains unchanged');
 }
