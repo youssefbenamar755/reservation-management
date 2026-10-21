@@ -272,7 +272,15 @@ try {
         && parse_url($anonymousUrl, PHP_URL_QUERY) === null && parse_url($anonymousUrl, PHP_URL_USER) === null, 'Unexpected anonymous R2 target');
     $anonymous = (new \GuzzleHttp\Client)->get($anonymousUrl, ['allow_redirects' => false, 'http_errors' => false, 'timeout' => 15, 'connect_timeout' => 5, 'verify' => true]);
     $anonymousStatus = $anonymous->getStatusCode();
-    cpAssert(in_array($anonymousStatus, [401, 403, 404], true), 'Unsigned R2 object request was not denied');
+    $anonymousBody = (string) $anonymous->getBody();
+    // R2's unsigned S3 endpoint returns 400 InvalidArgument/Authorization.
+    // Accept only this exact missing-auth response, never arbitrary 400 errors.
+    $anonymousXml = $anonymousStatus === 400 && strlen($anonymousBody) < 4096
+        ? @simplexml_load_string($anonymousBody, SimpleXMLElement::class, LIBXML_NONET) : false;
+    $missingAuthorization = $anonymousXml !== false && (string) $anonymousXml->Code === 'InvalidArgument'
+        && (string) $anonymousXml->Message === 'Authorization';
+    cpAssert(in_array($anonymousStatus, [401, 403, 404], true) || ($anonymousStatus === 400 && $missingAuthorization), 'Unsigned R2 object request was not denied');
+    cpAssert(hash('sha256', $anonymousBody) !== $document->sha256, 'Unsigned R2 returned private PDF bytes');
     cpOutput(['ok' => true, 'probe' => CSP_MARKER, 'phase' => $phase, 'checked_at' => gmdate(DATE_ATOM), 'runtime' => PHP_VERSION,
         'environment' => 'staging', 'schema' => 'documents_staging', 'disk' => 'documents_private', 'bucket' => $bucket,
         'document_id' => $document->id, 'sha256' => $document->sha256, 'bytes' => $document->size, 'approved_version' => $document->version,
@@ -280,7 +288,8 @@ try {
         'snapshot_ciphertext_sha256' => hash('sha256', $ciphertext), 'encrypted_snapshot_read' => true, 'encrypted_mime_read' => true,
         'send_attempts' => 0, 'mail_sent' => false, 'queue_jobs_dispatched' => $dispatched, 'worker' => $worker, 'owner_http' => 200, 'anonymous_http' => 401,
         'other_owner_http' => 403, 'cross_order_http' => 404, 'public_path_http' => $publicStatus, 'cache_control' => $cache,
-        'unsigned_r2_http' => $anonymousStatus, 'object_copies' => $copies, 'elapsed_seconds' => round(microtime(true) - $started, 3),
+        'unsigned_r2_http' => $anonymousStatus, 'unsigned_r2_missing_authorization' => $missingAuthorization,
+        'object_copies' => $copies, 'elapsed_seconds' => round(microtime(true) - $started, 3),
         'peak_allocated_bytes' => memory_get_peak_usage(true),
         'limits' => ['Application routes exercised in-process; edge HTTP access is a separate check.',
             'R2 unsigned S3 access denial does not replace inspecting bucket-wide public/CDN visibility.',
