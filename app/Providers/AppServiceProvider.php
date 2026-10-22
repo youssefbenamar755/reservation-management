@@ -13,7 +13,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Cloud applies its bucket default after config loads. Keep an explicit
+        // application override separate from the attached document disk.
+        $disk = $this->app['config']->get('filesystems.application_default');
+        if ($disk !== null && $disk !== '') {
+            if (! is_string($disk) || ! is_array($this->app['config']->get('filesystems.disks.'.$disk))) {
+                throw new \InvalidArgumentException('WPHUB_DEFAULT_DISK must name a configured filesystem disk.');
+            }
+            $this->app['config']->set('filesystems.default', $disk);
+        }
     }
 
     /**
