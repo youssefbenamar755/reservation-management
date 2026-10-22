@@ -263,6 +263,8 @@ Open [Useful alerts](/alerts) for grouped operational issues, including webhook 
 
 The notification bell provides notices such as new orders, form submissions, and useful alerts. Open a notification to review it, then mark it read or mark all read. Marking a notice read does not resolve the underlying order or error.
 
+New-order notifications work for every website, whether the order first arrives through a webhook or automatic/manual sync. The website owner and administrators each receive one saved notification, with a live popup and sound if enabled. Repeated deliveries and status changes do not create another alert. To keep historical imports quiet, an order must have been created within the previous 24 hours and after the website was added to WP Hub; missing creation dates are also silent. Existing imported orders are not backfilled with notifications. If a live broadcast is interrupted, the saved notification remains available in the bell when it refreshes.
+
 ## Marketing connection and audience
 
 ### Connect Brevo
