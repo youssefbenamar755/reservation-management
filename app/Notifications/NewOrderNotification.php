@@ -45,7 +45,7 @@ class NewOrderNotification extends Notification implements ShouldBroadcast
         $data = $this->toArray($notifiable);
 
         return [
-            // Laravel assigns this before delivery; the webhook reuses the saved inbox ID.
+            // Both import paths reuse the saved inbox ID for live delivery.
             'id' => $this->id,
             'type' => $data['type'],
             'message' => $data['message'],

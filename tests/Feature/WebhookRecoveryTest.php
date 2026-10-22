@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-07 10:00:00', 'UTC'));
     config(['queue.default' => 'sync', 'broadcasting.default' => 'null']);
     Http::preventStrayRequests();
     Http::fake();
@@ -32,9 +33,10 @@ beforeEach(function () {
         'user_id' => $this->actor->id, 'name' => 'Recovery fixture', 'slug' => 'recovery-fixture',
         'base_url' => 'https://recovery.example.test', 'status' => 'active',
     ]);
+    $this->website->forceFill(['created_at' => now()->subDay()])->save();
     $this->payload = [
         'id' => 42, 'status' => 'completed', 'currency' => 'EUR', 'total' => '75.00',
-        'date_created_gmt' => '2026-09-01T09:00:00', 'date_modified_gmt' => '2026-09-07T09:00:00',
+        'date_created_gmt' => '2026-09-07T09:00:00', 'date_modified_gmt' => '2026-09-07T09:00:00',
         'billing' => ['email' => 'synthetic@example.test', 'first_name' => 'Fixture'],
     ];
     $this->event = WebhookEvent::create([

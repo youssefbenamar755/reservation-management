@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-06 09:05:00', 'UTC'));
     config(['broadcasting.default' => 'null']);
     Http::preventStrayRequests();
     $this->owner = User::factory()->create();
@@ -22,6 +23,7 @@ beforeEach(function () {
         'slug' => 'fixture-store',
         'base_url' => 'https://fixture-store.example.test',
     ]);
+    $this->website->forceFill(['created_at' => now()->subDay()])->save();
     $this->payload = [
         'id' => 42,
         'status' => 'pending',

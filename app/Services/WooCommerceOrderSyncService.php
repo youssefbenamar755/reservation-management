@@ -93,7 +93,7 @@ class WooCommerceOrderSyncService
                     throw new RuntimeException('WooCommerce did not honor the requested sync window.');
                 }
 
-                $result = $this->orders->store($website->id, $payload);
+                $result = $this->orders->store($website->id, $payload, notifyNewOrder: true);
                 $synced += (int) $result['created'];
                 $updated += (int) (! $result['created'] && $result['changed']);
                 if (! $cursor || ! $modifiedAt->equalTo($cursor)) {

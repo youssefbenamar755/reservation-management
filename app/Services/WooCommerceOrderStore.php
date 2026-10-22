@@ -10,17 +10,19 @@ use InvalidArgumentException;
 
 class WooCommerceOrderStore
 {
+    public function __construct(private NewOrderNotifier $notifications) {}
+
     /** @return array{order: WcOrder, created: bool, changed: bool} */
-    public function store(int $websiteId, array $payload): array
+    public function store(int $websiteId, array $payload, bool $notifyNewOrder = false): array
     {
         $orderId = filter_var($payload['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($orderId === false) {
             throw new InvalidArgumentException('Missing or invalid WooCommerce order ID.');
         }
 
-        return DB::transaction(function () use ($websiteId, $orderId, $payload) {
+        return DB::transaction(function () use ($websiteId, $orderId, $payload, $notifyNewOrder) {
             // Serialize sync and webhook inserts even before an order row exists.
-            Website::whereKey($websiteId)->lockForUpdate()->firstOrFail();
+            $website = Website::whereKey($websiteId)->lockForUpdate()->firstOrFail();
             $order = WcOrder::firstOrNew(['website_id' => $websiteId, 'wp_order_id' => $orderId]);
             $created = ! $order->exists;
             $modifiedAt = ! empty($payload['date_modified_gmt'])
@@ -45,6 +47,10 @@ class WooCommerceOrderStore
             ]);
             $changed = $order->isDirty();
             $order->save();
+
+            if ($created && $notifyNewOrder) {
+                $this->notifications->notify($order, $website);
+            }
 
             return compact('order', 'created', 'changed');
         }, 3);

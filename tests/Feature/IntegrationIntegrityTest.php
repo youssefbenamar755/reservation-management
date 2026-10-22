@@ -134,13 +134,16 @@ test('legacy submission tokens cannot be read or serialized and other answers re
 })->with([false, true]);
 
 test('woo replays create one order and one inbox notification per recipient', function () {
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-01 12:00:00', 'UTC'));
     Event::fake([NewWcOrderReceived::class]);
     $website = integrationWebsite();
-    $first = integrationWooEvent($website, integrationOrder(123));
+    $website->forceFill(['created_at' => now()->subDay()])->save();
+    $payload = array_replace(integrationOrder(123), ['date_created_gmt' => now('UTC')->subMinute()->format('Y-m-d\TH:i:s')]);
+    $first = integrationWooEvent($website, $payload);
     $job = new ProcessWooWebhookEvent($first->id);
     app()->call([$job, 'handle']);
     app()->call([$job, 'handle']);
-    app()->call([new ProcessWooWebhookEvent(integrationWooEvent($website, integrationOrder(123))->id), 'handle']);
+    app()->call([new ProcessWooWebhookEvent(integrationWooEvent($website, $payload)->id), 'handle']);
 
     $this->assertDatabaseCount('wc_orders', 1);
     $this->assertDatabaseCount('notifications', 1);
@@ -148,9 +151,12 @@ test('woo replays create one order and one inbox notification per recipient', fu
 });
 
 test('an older or undated woo delivery cannot replace newer payment or order data', function () {
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-02 12:00:00', 'UTC'));
     Event::fake([NewWcOrderReceived::class]);
     $website = integrationWebsite();
-    app()->call([new ProcessWooWebhookEvent(integrationWooEvent($website, integrationOrder(123, '2026-09-02T12:00:00', 'completed'))->id), 'handle']);
+    $website->forceFill(['created_at' => now()->subDays(2)])->save();
+    $payload = array_replace(integrationOrder(123, '2026-09-02T12:00:00', 'completed'), ['date_created_gmt' => '2026-09-01T12:00:00']);
+    app()->call([new ProcessWooWebhookEvent(integrationWooEvent($website, $payload)->id), 'handle']);
     $stale = integrationWooEvent($website, integrationOrder(123, '2026-09-01T12:00:00'), 'order.updated');
     app()->call([new ProcessWooWebhookEvent($stale->id), 'handle']);
     $undated = integrationOrder(123);
@@ -164,11 +170,14 @@ test('an older or undated woo delivery cannot replace newer payment or order dat
 });
 
 test('broadcast failure does not lose the persisted order notification', function () {
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-01 12:00:00', 'UTC'));
     Event::listen(NewWcOrderReceived::class, function () {
         throw new RuntimeException('Fixture broadcaster outage');
     });
     $website = integrationWebsite();
-    $event = integrationWooEvent($website, integrationOrder(123));
+    $website->forceFill(['created_at' => now()->subDay()])->save();
+    $payload = array_replace(integrationOrder(123), ['date_created_gmt' => now('UTC')->subMinute()->format('Y-m-d\TH:i:s')]);
+    $event = integrationWooEvent($website, $payload);
     $job = new ProcessWooWebhookEvent($event->id);
     app()->call([$job, 'handle']);
     app()->call([$job, 'handle']);
