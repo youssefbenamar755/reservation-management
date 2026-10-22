@@ -15,6 +15,9 @@ return [
 
     'default' => env('FILESYSTEM_DISK', 'local'),
 
+    // Optional application default, reapplied after Cloud injects attached disks.
+    'application_default' => env('WPHUB_DEFAULT_DISK'),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks
