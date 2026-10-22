@@ -47,3 +47,5 @@ Schedule::command(\App\Console\Commands\ScanUsefulAlerts::class)->everyFiveMinut
 
 // Bounded marketing preparation; idle runs only check indexed local campaign state.
 Schedule::command(\App\Console\Commands\ProcessMarketingCampaigns::class)->everyMinute()->withoutOverlapping(3)->runInBackground();
+
+Schedule::command(\App\Console\Commands\RetryDocumentCompletion::class)->everyMinute()->withoutOverlapping(15)->runInBackground();

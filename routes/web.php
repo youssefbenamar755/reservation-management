@@ -27,6 +27,8 @@ Route::get('dashboard', DashboardController::class)
     ->name('dashboard');
 
 require __DIR__.'/settings.php';
+require __DIR__.'/document-deliveries.php';
+require __DIR__.'/document-settings.php';
 require __DIR__.'/marketing.php';
 require __DIR__.'/documentation.php';
 

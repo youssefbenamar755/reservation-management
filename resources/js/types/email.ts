@@ -1,3 +1,5 @@
+import type { DocumentWorkflowContext } from '@/types/document-delivery';
+
 export type EmailDeliveryStatus =
     | 'prepared'
     | 'sending'
@@ -45,6 +47,7 @@ export interface EmailHistory extends EmailDelivery {
     expires_at: string;
 }
 export interface OrderEmailContext {
+    workflow?: DocumentWorkflowContext;
     connection: { connected: boolean; email: string | null };
     settings_url: string;
     sender: EmailSender | null;
