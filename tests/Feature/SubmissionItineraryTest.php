@@ -46,6 +46,8 @@ test('external PNR requires a source and is never fabricated or treated as a gen
         ->assertUnprocessable()->assertJsonValidationErrors(['external_pnr', 'booking_source']);
     $this->postJson(route('submissions.itinerary.store', $this->entry), ['reference_type' => 'external', 'external_pnr' => 'abc123', 'booking_source' => 'Operator booking system'])
         ->assertOk()->assertJsonPath('itinerary.external_pnr', 'ABC123')->assertJsonPath('itinerary.booking_source', 'Operator booking system');
+    $this->get(route('submissions.itinerary.download', $this->entry))->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="Booked-itinerary-PNR-ABC123.pdf"');
     expect(SubmissionItinerary::first()->reference)->toStartWith('ITN-');
     $reference = SubmissionItinerary::first()->reference;
     $this->postJson(route('submissions.itinerary.store', $this->entry), ['reference_type' => 'internal'])

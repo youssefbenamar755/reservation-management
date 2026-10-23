@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import DocumentEmailPreview from '@/components/DocumentEmailPreview.vue';
+import GeneratedItineraryAttachment from '@/components/GeneratedItineraryAttachment.vue';
 import { Button } from '@/components/ui/button';
+import {
+    attachmentLimitError,
+    currentItineraryDocument,
+    readAddedItinerary,
+} from '@/lib/itineraryAttachments';
 import type {
     DocumentDeliveryHistory,
     DocumentDeliveryOutcome,
     DocumentDeliveryPreview,
     DocumentLanguage,
     DocumentWorkflowContext,
+    ItineraryAttachmentContext,
 } from '@/types/document-delivery';
 import axios from 'axios';
 import {
@@ -22,6 +29,10 @@ import { computed, onUnmounted, ref, shallowRef, watch } from 'vue';
 
 const props = defineProps<{
     orderId: number;
+    orderNumber?: string | number;
+    submissionId?: number;
+    active?: boolean;
+    itineraryAttachment?: ItineraryAttachmentContext;
     recipient: string;
     workflow: DocumentWorkflowContext;
     limits: {
@@ -36,6 +47,9 @@ const emit = defineEmits<{
     close: [];
 }>();
 const context = shallowRef(props.workflow);
+const itineraryAttachment = shallowRef(props.itineraryAttachment);
+const addingItinerary = ref(false);
+const attachmentNotice = ref('');
 const recipient = ref(props.recipient);
 const overrideReason = ref('');
 const language = ref<DocumentLanguage>(
@@ -75,8 +89,19 @@ const recipientChanged = computed(
 );
 const selectedDocuments = computed(() =>
     context.value.documents.filter(
-        (file) => selected.value.includes(file.id) && file.approved,
+        (file) =>
+            selected.value.includes(file.id) &&
+            file.approved &&
+            currentItineraryDocument(file, itineraryAttachment.value),
     ),
+);
+const itinerarySelected = computed(() =>
+    selectedDocuments.value.some(
+        (file) => file.source === 'submission_itinerary',
+    ),
+);
+const attachmentProblem = computed(() =>
+    attachmentLimitError(selectedDocuments.value, props.limits),
 );
 const canComplete = computed(
     () => context.value.store.supported && context.value.store.verified,
@@ -97,6 +122,7 @@ const blocked = computed(
         context.value.readiness.length > 0 ||
         !validRecipient.value ||
         selectedDocuments.value.length === 0 ||
+        !!attachmentProblem.value ||
         pendingFiles.value.length > 0 ||
         (recipientChanged.value && !overrideReason.value.trim()) ||
         (mode.value === 'complete' &&
@@ -193,6 +219,13 @@ function failure(exception: unknown, fallback: string) {
                     .filter(
                         (value): value is string => typeof value === 'string',
                     );
+            if (errors?.itinerary) {
+                invalidateItinerary();
+                resultUnconfirmed.value = false;
+                showPreview.value = false;
+                preview.value = null;
+                outcome.value = null;
+            }
         }
         if (exception.response?.status === 409)
             return 'The order, configuration, or documents changed. Refresh this view and review a new preview.';
@@ -210,7 +243,7 @@ async function run(
     action: (signal: AbortSignal) => Promise<void>,
     fallback: string,
 ) {
-    if (busy.value || disposed) return;
+    if (busy.value || disposed || props.active === false) return;
     const token = generation;
     busy.value = true;
     error.value = '';
@@ -230,13 +263,24 @@ async function run(
     }
 }
 async function refreshContext(signal?: AbortSignal) {
-    const id = props.orderId;
+    const id = props.orderId,
+        origin = props.submissionId,
+        token = generation;
     const { data } = await axios.get(`/orders/${id}/email`, {
+        params: origin ? { submission_id: origin } : undefined,
         signal,
         timeout: 25000,
         headers: { Accept: 'application/json' },
     });
-    if (disposed || id !== props.orderId) return;
+    if (
+        disposed ||
+        signal?.aborted ||
+        token !== generation ||
+        id !== props.orderId ||
+        origin !== props.submissionId ||
+        props.active === false
+    )
+        return;
     if (
         !data.workflow?.enabled ||
         !Array.isArray(data.workflow.documents) ||
@@ -244,11 +288,112 @@ async function refreshContext(signal?: AbortSignal) {
     )
         throw new Error('Workflow unavailable');
     context.value = data.workflow;
-    selected.value = selected.value.filter((id) =>
-        context.value.documents.some((file) => file.id === id && file.approved),
-    );
+    itineraryAttachment.value = data.itinerary_attachment;
+    pruneSelection();
+}
+function pruneSelection() {
+    const previousCount = selected.value.length;
+    selected.value = selectedDocuments.value.map((file) => file.id);
+    if (previousCount !== selected.value.length) {
+        attachmentNotice.value =
+            'A selected PDF changed or is no longer available. Select the current approved version before reviewing.';
+        if (['prepared', 'failed'].includes(status.value ?? '')) {
+            preview.value = null;
+            outcome.value = null;
+            showPreview.value = false;
+        }
+    }
+}
+function invalidateItinerary() {
+    itineraryAttachment.value = {
+        available: false,
+        source: null,
+        reason: 'The itinerary changed or is unavailable. Refresh to load its current version.',
+    };
+    pruneSelection();
+}
+async function reloadItinerary() {
+    await run(async (signal) => {
+        await refreshContext(signal);
+    }, 'The current itinerary could not be loaded. Your selected uploads are unchanged.');
+}
+async function addItinerary() {
+    const source = itineraryAttachment.value?.source;
+    if (
+        busy.value ||
+        disposed ||
+        props.active === false ||
+        !itineraryAttachment.value?.available ||
+        !source ||
+        itinerarySelected.value ||
+        pendingOutcome.value
+    )
+        return;
+    if (
+        selectedDocuments.value.length + pendingFiles.value.length >=
+        props.limits.max_files
+    ) {
+        error.value = `Select up to ${props.limits.max_files} PDFs for this email. Remove a PDF before adding the itinerary.`;
+        return;
+    }
+    await run(async (signal) => {
+        addingItinerary.value = true;
+        attachmentNotice.value = '';
+        try {
+            const { data } = await axios.post(
+                `/orders/${props.orderId}/email/itinerary`,
+                {
+                    submission_id: source.submission_id,
+                    source_version: source.source_version,
+                    approved: true,
+                    intended_customer_email: props.recipient,
+                },
+                {
+                    signal,
+                    timeout: 30000,
+                    headers: { Accept: 'application/json' },
+                },
+            );
+            const document = readAddedItinerary(data.document, source);
+            if (disposed || signal.aborted) return;
+            context.value = {
+                ...context.value,
+                documents: [
+                    ...context.value.documents.filter(
+                        (file) => file.id !== document.id,
+                    ),
+                    document,
+                ],
+            };
+            itineraryAttachment.value = data.itinerary_attachment;
+            pruneSelection();
+            if (
+                !currentItineraryDocument(document, itineraryAttachment.value)
+            ) {
+                error.value =
+                    'The itinerary changed while it was being added. Refresh and review the current PDF before adding it again.';
+                return;
+            }
+            const problem = attachmentLimitError(
+                [...selectedDocuments.value, ...pendingFiles.value, document],
+                props.limits,
+            );
+            if (problem) {
+                error.value = problem;
+                attachmentNotice.value =
+                    'The itinerary was saved but could not be selected. Remove another PDF, then add it again.';
+                return;
+            }
+            selected.value = [...new Set([...selected.value, document.id])];
+            attachmentNotice.value =
+                'Itinerary added and selected for review. No email has been sent.';
+        } finally {
+            if (!disposed && !signal.aborted) addingItinerary.value = false;
+        }
+    }, 'The itinerary could not be added. Your uploaded PDFs and email choices are unchanged.');
 }
 function chooseFiles(event: Event) {
+    if (busy.value || disposed || props.active === false) return;
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = '';
@@ -287,10 +432,11 @@ async function upload() {
             timeout: 30000,
             headers: { Accept: 'application/json' },
         });
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
+        await refreshContext(signal);
+        if (disposed || signal.aborted) return;
         pendingFiles.value = [];
         approvedUpload.value = false;
-        await refreshContext(signal);
         selected.value = [
             ...new Set([
                 ...selected.value,
@@ -337,7 +483,7 @@ async function prepare() {
         const { data } = await axios.post(
             `${base.value}/prepare`,
             {
-                document_ids: selected.value,
+                document_ids: selectedDocuments.value.map((file) => file.id),
                 recipient: recipient.value.trim(),
                 recipient_override_reason: recipientChanged.value
                     ? overrideReason.value.trim()
@@ -351,7 +497,7 @@ async function prepare() {
             },
             { signal, timeout: 30000, headers: { Accept: 'application/json' } },
         );
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         preview.value = readPreview(data.preview);
         outcome.value = data.delivery
             ? readOutcome(data.delivery, preview.value.id)
@@ -366,7 +512,7 @@ async function view(id: string) {
             `${base.value}/${encodeURIComponent(id)}`,
             { signal, timeout: 25000, headers: { Accept: 'application/json' } },
         );
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         preview.value = readPreview(data.preview);
         outcome.value = readOutcome(data.delivery, id);
         resultUnconfirmed.value = false;
@@ -385,7 +531,7 @@ async function send() {
             { confirmed: true },
             { signal, timeout: 30000, headers: { Accept: 'application/json' } },
         );
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         outcome.value = readOutcome(data.delivery, id);
         resultUnconfirmed.value = false;
         emit('settled', 'send');
@@ -406,7 +552,7 @@ async function retrySync() {
             {},
             { signal, timeout: 30000, headers: { Accept: 'application/json' } },
         );
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         outcome.value = readOutcome(data.delivery, id);
         emit('settled', 'status');
         await refreshContext(signal);
@@ -456,7 +602,7 @@ async function recordReview() {
             },
             { signal, timeout: 30000, headers: { Accept: 'application/json' } },
         );
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         outcome.value = readOutcome(data.delivery, id);
         resultUnconfirmed.value = false;
         reviewConfirmed.value = false;
@@ -468,7 +614,62 @@ watch(
     () => props.workflow,
     (value) => {
         context.value = value;
+        pruneSelection();
     },
+);
+watch(
+    () => props.itineraryAttachment,
+    (value) => {
+        itineraryAttachment.value = value;
+        pruneSelection();
+    },
+);
+function cancelRequest() {
+    generation++;
+    request?.abort();
+    request = null;
+    busy.value = false;
+    addingItinerary.value = false;
+    emit('busy', false);
+}
+watch(
+    () => props.active,
+    (value) => {
+        if (value === false) cancelRequest();
+    },
+    { flush: 'sync' },
+);
+watch(
+    () => [props.orderId, props.submissionId],
+    () => {
+        cancelRequest();
+        context.value = props.workflow;
+        itineraryAttachment.value = props.itineraryAttachment;
+        selected.value = [];
+        pendingFiles.value = [];
+        approvedUpload.value = false;
+        recipient.value = props.recipient;
+        overrideReason.value = '';
+        language.value =
+            props.workflow.language || props.workflow.profile.default_language;
+        covered.value = [];
+        fulfillmentConfirmed.value = false;
+        mode.value = props.workflow.store.verified ? 'complete' : 'partial';
+        previous.value = null;
+        resendConfirmed.value = false;
+        preview.value = null;
+        outcome.value = null;
+        resultUnconfirmed.value = false;
+        showPreview.value = false;
+        reviewDecision.value = 'not_sent';
+        reviewReason.value = '';
+        reviewMessageId.value = '';
+        reviewConfirmed.value = false;
+        attachmentNotice.value = '';
+        error.value = '';
+        fieldErrors.value = [];
+    },
+    { flush: 'sync' },
 );
 onUnmounted(() => {
     disposed = true;
@@ -613,6 +814,32 @@ defineExpose({
                     class="space-y-3"
                     aria-labelledby="approved-document-heading"
                 >
+                    <GeneratedItineraryAttachment
+                        v-if="itineraryAttachment || submissionId"
+                        :attachment="itineraryAttachment"
+                        :submission-id="submissionId"
+                        :order-number="orderNumber ?? orderId"
+                        :recipient="props.recipient"
+                        :busy="busy || pendingOutcome"
+                        :adding="addingItinerary"
+                        :selected="itinerarySelected"
+                        @add="addItinerary"
+                        @refresh="reloadItinerary"
+                    />
+                    <p
+                        v-if="attachmentNotice"
+                        role="status"
+                        class="text-xs text-muted-foreground"
+                    >
+                        {{ attachmentNotice }}
+                    </p>
+                    <p
+                        v-if="attachmentProblem"
+                        role="alert"
+                        class="text-xs text-destructive"
+                    >
+                        {{ attachmentProblem }}
+                    </p>
                     <div class="flex items-center justify-between gap-2">
                         <h3
                             id="approved-document-heading"
@@ -633,8 +860,8 @@ defineExpose({
                         v-if="!context.documents.length"
                         class="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground"
                     >
-                        No approved PDFs yet. Upload documents from your booking
-                        system below.
+                        No approved PDFs yet. Add the generated itinerary above
+                        or upload documents from your booking system below.
                     </div>
                     <ul v-else class="divide-y rounded-lg border">
                         <li
@@ -645,7 +872,11 @@ defineExpose({
                             <label
                                 class="flex min-w-0 flex-1 items-center gap-3 p-3 text-sm"
                                 :class="
-                                    !file.approved
+                                    !file.approved ||
+                                    !currentItineraryDocument(
+                                        file,
+                                        itineraryAttachment,
+                                    )
                                         ? 'opacity-50'
                                         : 'cursor-pointer'
                                 "
@@ -653,7 +884,13 @@ defineExpose({
                                     v-model="selected"
                                     type="checkbox"
                                     :value="file.id"
-                                    :disabled="!file.approved"
+                                    :disabled="
+                                        !file.approved ||
+                                        !currentItineraryDocument(
+                                            file,
+                                            itineraryAttachment,
+                                        )
+                                    "
                                     class="size-4 accent-primary"
                                 /><FileText
                                     class="size-4 shrink-0 text-muted-foreground"
@@ -664,9 +901,14 @@ defineExpose({
                                         >{{ bytes(file.size) }} · Version
                                         {{ file.version }} ·
                                         {{
-                                            file.approved
-                                                ? 'Approved'
-                                                : 'Not approved'
+                                            !currentItineraryDocument(
+                                                file,
+                                                itineraryAttachment,
+                                            )
+                                                ? 'Earlier itinerary version'
+                                                : file.approved
+                                                  ? 'Approved'
+                                                  : 'Not approved'
                                         }}</span
                                     ></span
                                 ></label

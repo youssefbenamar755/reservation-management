@@ -86,17 +86,10 @@ class SubmissionItineraryController extends Controller
         $this->authorize('view', $entry);
         $itinerary = SubmissionItinerary::where('ff_submission_id', $entry->id)->firstOrFail();
         abort_unless($itinerary->template === 'classic_v1', 422, 'This document template is unavailable.');
-        $document = array_merge($itinerary->snapshot, [
-            'reference' => $itinerary->reference,
-            'reference_type' => $itinerary->reference_type,
-            'external_pnr' => $itinerary->external_pnr,
-            'booking_source' => $itinerary->booking_source,
-            'generated_at' => $itinerary->generated_at->toIso8601String(),
-        ]);
 
-        return response($pdf->render($document))->withHeaders([
+        return response($pdf->render($itinerary->document()))->withHeaders([
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="Itinerary-'.$itinerary->reference.'.pdf"',
+            'Content-Disposition' => 'attachment; filename="'.$itinerary->filename().'"',
             'Cache-Control' => 'private, no-store, max-age=0',
             'X-Content-Type-Options' => 'nosniff',
         ]);

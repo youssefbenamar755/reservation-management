@@ -7,6 +7,9 @@ use Dompdf\Options;
 
 class SubmissionItineraryPdf
 {
+    // Bump when PDF rendering changes so stored email attachments require review again.
+    public const RENDER_VERSION = '2026-10-23-itinerary-email-v1';
+
     /**
      * Render a normalized itinerary as PDF bytes without storing the document.
      *
