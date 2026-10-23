@@ -144,7 +144,8 @@ test('basic flight fields produce only the supplied route dates and an explicit 
         ->and($return['arrival']['airport_code'])->toBe('CMN')
         ->and($return['departure']['date'])->toBe('2026-12-12')
         ->and($return['arrival']['date'])->toBeNull();
-    foreach (['carrier_code', 'airline', 'flight_number', 'duration', 'baggage', 'cabin'] as $missing) {
+    expect($data['trips'][0]['duration'])->toBeNull()->and($data['trips'][1]['duration'])->toBeNull();
+    foreach (['carrier_code', 'airline', 'flight_number', 'duration', 'baggage', 'cabin', 'operating_carrier', 'airline_reference', 'layover_after'] as $missing) {
         expect($outbound[$missing])->toBeNull()->and($return[$missing])->toBeNull();
     }
 });
@@ -205,4 +206,101 @@ test('partly populated segments are retained with unknown facts and duplicate of
         ->and($data['trips'][0]['segments'][1]['departure']['airport_code'])->toBe('LIS')
         ->and($data['trips'][0]['segments'][1]['arrival']['airport_code'])->toBeNull()
         ->and($data['trips'][0]['segments'][1]['arrival']['date'])->toBeNull();
+});
+
+function itineraryConnectionFixture(): array
+{
+    return ['itineraries' => [['segments' => [
+        ['duration' => 'PT2H', 'carrierCode' => 'XY', 'operating' => ['carrierCode' => 'ZZ'], 'bookingReference' => 'AIR-123',
+            'departure' => ['iataCode' => 'AAA', 'at' => '2026-12-02T08:00:00+01:00'],
+            'arrival' => ['iataCode' => 'BBB', 'airportName' => 'Example Connection Airport', 'at' => '2026-12-02T10:00:00+01:00']],
+        ['duration' => 'PT3H', 'carrierCode' => 'XY',
+            'departure' => ['iataCode' => 'BBB', 'at' => '2026-12-02T12:30:00+01:00'],
+            'arrival' => ['iataCode' => 'CCC', 'at' => '2026-12-02T15:30:00+01:00']],
+    ]]]];
+}
+
+test('known offset connections supply accurate layovers and complete trip duration without inventing references', function () {
+    $offer = itineraryConnectionFixture();
+    $offer['pnr'] = 'OFFER-PNR';
+    $offer['itineraries'][0]['bookingReference'] = 'TRIP-PNR';
+    $trip = (new SubmissionItineraryData)->fromPayload([
+        'pnr' => 'GENERAL-PNR', 'reference' => 'ITN-EXAMPLE',
+        'response' => ['flight_json_data' => $offer, 'external_pnr' => 'EXTERNAL-PNR'],
+    ])['trips'][0];
+
+    expect($trip['duration'])->toBe('7h 30m')
+        ->and($trip['segments'][0]['operating_carrier'])->toBe('ZZ')
+        ->and($trip['segments'][0]['airline_reference'])->toBe('AIR-123')
+        ->and($trip['segments'][0]['layover_after'])->toBe([
+            'duration' => '2h 30m', 'airport_code' => 'BBB', 'airport_name' => 'Example Connection Airport',
+        ])
+        ->and($trip['segments'][1]['operating_carrier'])->toBeNull()
+        ->and($trip['segments'][1]['airline_reference'])->toBeNull()
+        ->and($trip['segments'][1]['layover_after'])->toBeNull();
+});
+
+test('supplied itinerary duration and explicit segment aliases remain authoritative', function () {
+    $offer = itineraryConnectionFixture();
+    $offer['itineraries'][0]['duration'] = 'PT9H15M';
+    $offer['itineraries'][0]['segments'][1]['operating_carrier'] = 'Example Operating Airline';
+    $offer['itineraries'][0]['segments'][1]['airline_reference'] = 'SAVED-456';
+    $trip = (new SubmissionItineraryData)->fromPayload(['flight_json_data' => $offer])['trips'][0];
+
+    expect($trip['duration'])->toBe('9h 15m')
+        ->and($trip['segments'][1]['operating_carrier'])->toBe('Example Operating Airline')
+        ->and($trip['segments'][1]['airline_reference'])->toBe('SAVED-456');
+});
+
+test('unreliable connections leave layovers and derived totals unknown', function (array $arrival, array $departure) {
+    $offer = itineraryConnectionFixture();
+    $offer['itineraries'][0]['segments'][0]['arrival'] = $arrival;
+    $offer['itineraries'][0]['segments'][1]['departure'] = $departure;
+    $trip = (new SubmissionItineraryData)->fromPayload(['flight_json_data' => $offer])['trips'][0];
+
+    expect($trip['segments'][0]['layover_after'])->toBeNull()->and($trip['duration'])->toBeNull()
+        ->and($trip['segments'])->toHaveCount(2);
+})->with([
+    'different airports' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00Z'], ['iataCode' => 'CCC', 'at' => '2026-12-02T12:00:00Z']],
+    'negative interval' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00Z'], ['iataCode' => 'BBB', 'at' => '2026-12-02T09:59:00Z']],
+    'unknown local timezones' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00'], ['iataCode' => 'BBB', 'at' => '2026-12-02T12:00:00']],
+    'one timezone missing' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00Z'], ['iataCode' => 'BBB', 'at' => '2026-12-02T12:00:00']],
+    'ambiguous abbreviation' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00', 'timezone' => 'CST'], ['iataCode' => 'BBB', 'at' => '2026-12-02T12:00:00', 'timezone' => 'CST']],
+    'invalid timezone' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00', 'timezone' => 'Example/Unknown'], ['iataCode' => 'BBB', 'at' => '2026-12-02T12:00:00', 'timezone' => 'Example/Unknown']],
+    'DST repeated local time' => [['iataCode' => 'BBB', 'at' => '2026-10-25T02:30:00', 'timezone' => 'Europe/Paris'], ['iataCode' => 'BBB', 'at' => '2026-10-25T04:30:00', 'timezone' => 'Europe/Paris']],
+    'DST nonexistent local time' => [['iataCode' => 'BBB', 'at' => '2026-03-29T02:30:00', 'timezone' => 'Europe/Paris'], ['iataCode' => 'BBB', 'at' => '2026-03-29T04:30:00', 'timezone' => 'Europe/Paris']],
+    'invalid explicit offset' => [['iataCode' => 'BBB', 'at' => '2026-12-02T10:00:00+25:00'], ['iataCode' => 'BBB', 'at' => '2026-12-02T12:00:00+25:00']],
+    'date without clock time' => [['iataCode' => 'BBB', 'date' => '2026-12-02', 'timezone' => 'UTC'], ['iataCode' => 'BBB', 'date' => '2026-12-03', 'timezone' => 'UTC']],
+]);
+
+test('explicit timezones resolve known instants without converting displayed local flight times', function (array $arrival, array $departure, string $duration) {
+    $offer = itineraryConnectionFixture();
+    $offer['itineraries'][0]['segments'][0]['arrival'] = ['iataCode' => 'BBB'] + $arrival;
+    $offer['itineraries'][0]['segments'][1]['departure'] = ['iataCode' => 'BBB'] + $departure;
+    $trip = (new SubmissionItineraryData)->fromPayload(['flight_json_data' => $offer])['trips'][0];
+
+    expect($trip['segments'][0]['layover_after']['duration'])->toBe($duration)
+        ->and($trip['segments'][0]['arrival']['time'])->toBe(substr($arrival['at'], 11, 5))
+        ->and($trip['segments'][1]['departure']['time'])->toBe(substr($departure['at'], 11, 5));
+})->with([
+    'named timezone around DST jump' => [['at' => '2026-03-29T01:30:00', 'timezone' => 'Europe/Paris'], ['at' => '2026-03-29T03:30:00', 'timezone' => 'Europe/Paris'], '1h'],
+    'explicit offsets disambiguate DST repeat' => [['at' => '2026-10-25T02:30:00+02:00'], ['at' => '2026-10-25T02:30:00+01:00'], '1h'],
+    'UTC timestamps with minute precision' => [['at' => '2026-12-02T10:00Z'], ['at' => '2026-12-02T12:30Z'], '2h 30m'],
+    'supplied fixed timezone offset' => [['at' => '2026-12-02T10:00:00', 'timezone' => '+05:30'], ['at' => '2026-12-02T12:00:00', 'timezone' => '+05:30'], '2h'],
+    'zero connection interval' => [['at' => '2026-12-02T10:00:00Z'], ['at' => '2026-12-02T10:00:00Z'], '0m'],
+    'precise seconds' => [['at' => '2026-12-02T10:00:30Z'], ['at' => '2026-12-02T10:02:45Z'], '2m 15s'],
+]);
+
+test('derived totals require every segment duration and cannot bridge a missing submitted leg', function () {
+    $normalizer = new SubmissionItineraryData;
+    $offer = itineraryConnectionFixture();
+    unset($offer['itineraries'][0]['segments'][1]['duration']);
+    $trip = $normalizer->fromPayload(['flight_json_data' => $offer])['trips'][0];
+    expect($trip['duration'])->toBeNull()->and($trip['segments'][0]['layover_after']['duration'])->toBe('2h 30m');
+
+    $offer = itineraryConnectionFixture();
+    array_splice($offer['itineraries'][0]['segments'], 1, 0, [[]]);
+    $trip = $normalizer->fromPayload(['flight_json_data' => $offer])['trips'][0];
+    expect($trip['duration'])->toBeNull()->and($trip['segments'][0]['layover_after'])->toBeNull()
+        ->and($trip['segments'])->toHaveCount(2);
 });

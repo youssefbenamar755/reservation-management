@@ -118,6 +118,19 @@ test('details expose the document controls and authenticated URL without its pri
         ->where('itinerary.download_url', route('submissions.itinerary.download', $this->entry, false))->missing('itinerary.snapshot'));
 });
 
+test('agency details are scoped to the website and saved without website logos', function () {
+    \App\Models\Setting::set('itinerary_agency:'.$this->site->id, ['name' => 'Example Agency', 'address' => '10 Sample Avenue', 'consultant_name' => 'Example Consultant']);
+    \App\Models\Setting::set('itinerary_agency:999999', ['name' => 'Unrelated Agency']);
+    $this->postJson(route('submissions.itinerary.store', $this->entry), ['reference_type' => 'internal'])->assertOk();
+    $snapshot = SubmissionItinerary::firstOrFail()->snapshot;
+    expect($snapshot['agency'])->toBe(['consultant_name' => 'Example Consultant', 'name' => 'Example Agency', 'address' => '10 Sample Avenue']);
+    expect($snapshot['website'])->not->toHaveKey('logo_data_uri');
+    \App\Models\Setting::set('itinerary_agency:'.$this->site->id, ['name' => 'Changed Agency']);
+    $this->get(route('submissions.itinerary.download', $this->entry))->assertOk();
+    expect(SubmissionItinerary::firstOrFail()->snapshot['agency'])->toBe($snapshot['agency']);
+    Http::assertNothingSent();
+});
+
 test('metadata-only flights and oversized text are rejected rather than invented or truncated', function (array $response) {
     $this->entry->update(['payload' => ['response' => $response]]);
     $this->postJson(route('submissions.itinerary.store', $this->entry), ['reference_type' => 'internal'])

@@ -26,7 +26,11 @@ class SubmissionItineraryPdf
         $pdf->setPaper('A4', 'portrait');
         $pdf->loadHtml(view('pdf.submission-itinerary', [
             'document' => $document,
-            'logoDataUri' => $this->logoDataUri($document['website']['logo_data_uri'] ?? null),
+            'airlineLogoDataUris' => $this->airlineLogos($document),
+            'flightIconDataUris' => [
+                'outbound' => $this->localImage(resource_path('images/itinerary/outbound.png')),
+                'return' => $this->localImage(resource_path('images/itinerary/return.png')),
+            ],
         ])->render(), 'UTF-8');
         $pdf->render();
 
@@ -44,23 +48,42 @@ class SubmissionItineraryPdf
         return $pdf->output();
     }
 
-    private function logoDataUri(mixed $value): ?string
+    private function airlineLogos(array $document): array
     {
-        if (! extension_loaded('gd')) {
+        $manifestPath = resource_path('images/airlines/manifest.json');
+        $manifest = is_file($manifestPath) ? json_decode(file_get_contents($manifestPath), true) : [];
+        $logos = [];
+        foreach ($document['trips'] ?? [] as $trip) {
+            foreach ($trip['segments'] ?? [] as $segment) {
+                $code = strtoupper(trim((string) ($segment['carrier_code'] ?? '')));
+                if (! preg_match('/\A[A-Z0-9]{2}\z/D', $code) || isset($logos[$code])) {
+                    continue;
+                }
+                // Both the carrier key and filename must match the packaged catalog.
+                // Neither submitted URLs nor airline-name guesses become image sources.
+                if (($manifest[$code] ?? null) === $code.'.png') {
+                    $logo = $this->localImage(resource_path('images/airlines/'.$code.'.png'));
+                    if ($logo !== null) {
+                        $logos[$code] = $logo;
+                    }
+                }
+            }
+        }
+
+        return $logos;
+    }
+
+    private function localImage(string $path): ?string
+    {
+        if (! extension_loaded('gd') || ! is_file($path) || filesize($path) > 1000000) {
+            return null;
+        }
+        $bytes = file_get_contents($path);
+        $image = @getimagesizefromstring($bytes);
+        if ($image === false || $image[2] !== IMAGETYPE_PNG || $image[0] > 2000 || $image[1] > 2000) {
             return null;
         }
 
-        // The brand loader supplies a local raster image. Never let document
-        // fields become remote, filesystem, or SVG resources in the renderer.
-        if (! is_string($value) || strlen($value) > 3 * 1024 * 1024
-            || ! preg_match('/\Adata:image\/(png|jpeg);base64,([A-Za-z0-9+\/\r\n=]+)\z/', $value, $matches)) {
-            return null;
-        }
-
-        $bytes = base64_decode($matches[2], true);
-        $image = $bytes === false ? false : @getimagesizefromstring($bytes);
-        $expectedType = $matches[1] === 'png' ? IMAGETYPE_PNG : IMAGETYPE_JPEG;
-
-        return $image !== false && $image[2] === $expectedType ? $value : null;
+        return 'data:image/png;base64,'.base64_encode($bytes);
     }
 }

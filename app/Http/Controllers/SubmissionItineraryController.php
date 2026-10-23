@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\FfSubmission;
+use App\Models\Setting;
 use App\Models\SubmissionItinerary;
 use App\Models\WebsiteDocumentProfile;
 use App\Services\SubmissionItineraryData;
@@ -50,8 +51,13 @@ class SubmissionItineraryController extends Controller
             $snapshot['website'] = [
                 'name' => $profile?->brand_name ?: $entry->website->name,
                 'host' => parse_url($entry->website->base_url, PHP_URL_HOST) ?: '',
-                'logo_data_uri' => $this->localLogo($profile?->logo_url),
             ];
+            $agency = Setting::get('itinerary_agency:'.$entry->website_id, []);
+            $snapshot['agency'] = [];
+            foreach (['consultant_name' => 120, 'name' => 180, 'address' => 500] as $field => $maxLength) {
+                $value = is_array($agency) ? ($agency[$field] ?? null) : null;
+                $snapshot['agency'][$field] = is_string($value) && mb_strlen($value) <= $maxLength ? trim($value) : null;
+            }
             $snapshot['schema_version'] = 1;
             $itinerary = SubmissionItinerary::firstOrNew(['ff_submission_id' => $entry->id]);
             $itinerary->fill([
@@ -110,23 +116,5 @@ class SubmissionItineraryController extends Controller
         abort_unless(is_string($path) && str_starts_with($path, 'dummy-tickets/') && ! str_contains($path, '..') && ! str_contains($path, '\\') && Storage::disk('public')->exists($path), 404);
 
         return Storage::disk('public')->download($path, 'Legacy-itinerary.pdf', ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
-    }
-
-    private function localLogo(?string $url): ?string
-    {
-        // Only packaged brand images may be embedded. Never fetch a submitted URL.
-        if (! $url) {
-            return null;
-        }
-        $path = parse_url($url, PHP_URL_PATH);
-        if (! is_string($path) || ! preg_match('#\A/images/email-brands/[a-z0-9-]+\.png\z#D', $path)) {
-            return null;
-        }
-        $file = public_path(ltrim($path, '/'));
-        if (! is_file($file) || filesize($file) > 1000000) {
-            return null;
-        }
-
-        return 'data:image/png;base64,'.base64_encode(file_get_contents($file));
     }
 }
