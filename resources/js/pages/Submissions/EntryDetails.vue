@@ -6,11 +6,12 @@ import { computed, ref, watch } from 'vue'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Trash2, ArrowLeft, Calendar, Globe, FileText, ClipboardList, Code, Copy, CheckCircle2, Ticket, Loader2, AlertCircle, Download, Users, Plane, ChevronDown } from 'lucide-vue-next'
+import { Trash2, ArrowLeft, Calendar, Globe, FileText, ClipboardList, Copy, CheckCircle2, Code, Loader2, Users, Plane, ChevronDown } from 'lucide-vue-next'
 import { Link } from '@inertiajs/vue3'
 import { useToast } from '@/composables/useToast'
 import FlightCard from '@/components/FlightCard.vue'
 import EntryField from '@/components/submissions/EntryField.vue'
+import ItineraryDocumentCard from '@/components/submissions/ItineraryDocumentCard.vue'
 import EntryFieldValue from '@/components/submissions/EntryFieldValue.vue'
 import OrderStatusControl from '@/components/OrderStatusControl.vue'
 import OrderEmailComposer from '@/components/OrderEmailComposer.vue'
@@ -27,6 +28,16 @@ interface LinkedSubmissionOrder {
 const props = defineProps<{ 
   entry: any
   linkedOrder?: LinkedSubmissionOrder | null
+  itinerary?: {
+    reference: string
+    reference_type: 'internal' | 'external'
+    external_pnr: string | null
+    booking_source: string | null
+    generated_at: string
+    download_url: string
+    can_update: boolean
+  } | null
+  itineraryCanGenerate?: boolean
   formSchema?: {
     fields?: Record<string, { label: string; type: string }>
   } | null
@@ -43,11 +54,8 @@ const isDeleting = ref(false)
 const showRawPayload = ref(false)
 const showEmptyFields = ref(false)
 const copiedField = ref<string | null>(null)
-const isGeneratingAmadeusCode = ref(false)
-const isGeneratingPnr = ref(false)
 const page = usePage()
 const lastProcessedFlash = ref<{ success?: string; error?: string }>({})
-const entryPdfs = ref<Array<{ passenger_name: string; url: string }>>([])
 const isRefreshingLinkedOrder = ref(false)
 let linkedOrderReload = 0
 
@@ -138,114 +146,6 @@ function copyToClipboard(text: unknown, fieldKey: string) {
   }).catch(() => {
     toast.error('Failed to copy')
   })
-}
-
-// Check if entry has sufficient flight data to generate Amadeus code
-const hasFlightData = computed(() => {
-  // Check if we have flight JSON data
-  const hasFlightJson = formFields.value.some(field => field.isFlight === true)
-  
-  // Check if we have basic flight fields
-  const hasBasicFields = (flightFromField.value && flightToField.value) || 
-                         (flightDepartureField.value && flightFromField.value)
-  
-  return hasFlightJson || hasBasicFields
-})
-
-// Generate Amadeus code
-function generateAmadeusCode() {
-  if (!hasFlightData.value) {
-    toast.error('Insufficient flight data to generate ticket')
-    return
-  }
-
-  isGeneratingAmadeusCode.value = true
-  
-  router.post(`/submissions/entries/${props.entry.id}/generate-amadeus-code`, {}, {
-    preserveScroll: true,
-    onSuccess: () => {
-      isGeneratingAmadeusCode.value = false
-      // Reload the page to show the generated code
-      router.reload({ only: ['entry'] })
-    },
-    onError: (errors) => {
-      isGeneratingAmadeusCode.value = false
-      toast.error(errors.message || 'Failed to generate Amadeus code')
-    },
-  })
-}
-
-// Generate PNR
-function generatePnr() {
-  if (!hasFlightData.value) {
-    toast.error('Insufficient flight data to generate PNR')
-    return
-  }
-
-  if (props.entry.pnr) {
-    toast.error('PNR already exists for this submission')
-    return
-  }
-
-  isGeneratingPnr.value = true
-  
-  router.post(`/submissions/entries/${props.entry.id}/generate-pnr`, {}, {
-    preserveScroll: true,
-    onSuccess: () => {
-      isGeneratingPnr.value = false
-      
-      // Reload entry data to show the generated PNR (partial reload, no full page refresh)
-      router.reload({ 
-        only: ['entry'],
-        onSuccess: (reloadedPage) => {
-          // Check for PDFs in flash data (new format with multiple PDFs)
-          const flash = (reloadedPage.props as any).flash
-          if (flash?.pdfs && Array.isArray(flash.pdfs) && flash.pdfs.length > 0) {
-            // Multiple PDFs - show success message with count
-            toast.success(`PNR generated successfully. ${flash.pdfs.length} PDF(s) generated.`)
-            // Store PDFs for display
-            entryPdfs.value = flash.pdfs
-          } else {
-            // Fallback to single PDF (backward compatibility)
-            const entry = (reloadedPage.props as any).entry
-            if (entry?.pnr_pdf_path) {
-              // Construct PDF URL - Laravel's storage link
-              const pdfUrl = `/storage/${entry.pnr_pdf_path}`
-              // Open PDF in new tab
-              openUrl(pdfUrl)
-              toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
-            } else if (flash?.pdf_url) {
-              openUrl(flash.pdf_url)
-              toast.success('PNR generated successfully. Dummy Ticket PDF opened in new tab.')
-            }
-          }
-        }
-      })
-    },
-    onError: (errors) => {
-      isGeneratingPnr.value = false
-      toast.error(errors.message || 'Failed to generate PNR')
-    },
-  })
-}
-
-// Download PDF
-function downloadPdf() {
-  if (!props.entry.pnr_pdf_path) {
-    toast.error('PDF not available for this submission')
-    return
-  }
-
-  if (typeof window !== 'undefined') {
-    window.location.href = `/submissions/entries/${props.entry.id}/download-pdf`
-  }
-}
-
-// Open URL in new tab
-function openUrl(url: string) {
-  if (typeof window !== 'undefined') {
-    window.open(url, '_blank')
-  }
 }
 
 function isFieldEmpty(value: any): boolean {
@@ -1004,15 +904,15 @@ const technicalMetadata = computed(() => [
                             <span
                                 class="h-1.5 w-1.5 rounded-full"
                                 :class="
-                                    entry.pnr
+                                    itinerary
                                         ? 'bg-emerald-500'
                                         : 'bg-muted-foreground'
                                 "
                             />
                             {{
-                                entry.pnr
-                                    ? 'PNR generated'
-                                    : 'PNR not generated'
+                                itinerary
+                                    ? 'Itinerary ready'
+                                    : 'Itinerary not generated'
                             }}
                         </Badge>
                     </div>
@@ -1040,7 +940,7 @@ const technicalMetadata = computed(() => [
                     <a
                         href="#booking-tools"
                         class="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                        >Booking tools</a
+                        >Itinerary &amp; documents</a
                     >
                     <a
                         v-if="additionalFields.length"
@@ -1422,244 +1322,38 @@ const technicalMetadata = computed(() => [
                             </template>
                         </CardContent>
                     </Card>
-                    <Card
-                        id="booking-tools"
-                        class="min-w-0 scroll-mt-6 gap-0 shadow-none"
+                    <ItineraryDocumentCard
+                        :key="entry.id"
+                        :entry-id="entry.id"
+                        :itinerary="itinerary"
+                        :can-generate="itineraryCanGenerate === true"
+                    />
+                    <details
+                        v-if="entry.pnr || entry.pnr_pdf_path"
+                        class="min-w-0 rounded-xl border border-border bg-card p-5"
                     >
-                        <CardHeader class="border-b border-border pb-5">
-                            <h2
-                                class="flex items-center gap-2 text-base font-semibold"
-                            >
-                                <Ticket class="h-4 w-4 text-muted-foreground" />
-                                Booking tools
-                            </h2>
-                            <CardDescription
-                                >PNR, ticket code, and
-                                documents.</CardDescription
-                            >
-                        </CardHeader>
-                        <CardContent class="min-w-0 space-y-5 pt-5">
-                            <section
-                                class="space-y-3"
-                                aria-labelledby="pnr-heading"
-                            >
-                                <div
-                                    class="flex items-center justify-between gap-3"
-                                >
-                                    <h3
-                                        id="pnr-heading"
-                                        class="text-sm font-medium"
-                                    >
-                                        PNR confirmation
-                                    </h3>
-                                    <span
-                                        v-if="!entry.pnr"
-                                        class="text-xs text-muted-foreground"
-                                        >Not generated</span
-                                    >
-                                </div>
-                                <div v-if="entry.pnr" class="space-y-3">
-                                    <div
-                                        class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4"
-                                    >
-                                        <div class="min-w-0">
-                                            <p
-                                                class="font-mono text-xl font-semibold tracking-widest [overflow-wrap:anywhere]"
-                                            >
-                                                {{ entry.pnr }}
-                                            </p>
-                                            <p
-                                                v-if="entry.pnr_source"
-                                                class="mt-1 text-xs text-muted-foreground"
-                                            >
-                                                {{
-                                                    entry.pnr_source ===
-                                                    'amadeus_direct'
-                                                        ? 'Direct'
-                                                        : 'Search'
-                                                }}
-                                                booking
-                                            </p>
-                                        </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            class="h-8 w-8 shrink-0"
-                                            aria-label="Copy PNR"
-                                            @click="
-                                                copyToClipboard(
-                                                    entry.pnr,
-                                                    'pnr',
-                                                )
-                                            "
-                                            ><CheckCircle2
-                                                v-if="copiedField === 'pnr'"
-                                                class="h-4 w-4 text-emerald-600 dark:text-emerald-400" /><Copy
-                                                v-else
-                                                class="h-4 w-4"
-                                        /></Button>
-                                    </div>
-                                    <div
-                                        v-if="entryPdfs.length"
-                                        class="space-y-2"
-                                    >
-                                        <Button
-                                            v-for="(pdf, index) in entryPdfs"
-                                            :key="index"
-                                            variant="outline"
-                                            size="sm"
-                                            class="h-auto min-h-9 w-full justify-start gap-2 py-2 text-left whitespace-normal"
-                                            @click="openUrl(pdf.url)"
-                                            ><Download
-                                                class="h-4 w-4 shrink-0"
-                                            /><span
-                                                class="min-w-0 [overflow-wrap:anywhere]"
-                                                >Download
-                                                {{
-                                                    pdf.passenger_name ||
-                                                    `PDF ${index + 1}`
-                                                }}</span
-                                            ></Button
-                                        >
-                                    </div>
-                                    <Button
-                                        v-else-if="entry.pnr_pdf_path"
-                                        variant="outline"
-                                        size="sm"
-                                        class="w-full gap-2"
-                                        @click="downloadPdf"
-                                        ><Download class="h-4 w-4" /> Download
-                                        PDF</Button
-                                    >
-                                </div>
-                                <Button
-                                    :disabled="
-                                        isGeneratingPnr ||
-                                        !hasFlightData ||
-                                        !!entry.pnr
-                                    "
-                                    :variant="entry.pnr ? 'outline' : 'default'"
-                                    class="w-full gap-2"
-                                    @click="generatePnr"
-                                >
-                                    <Loader2
-                                        v-if="isGeneratingPnr"
-                                        class="h-4 w-4 animate-spin"
-                                    /><CheckCircle2
-                                        v-else-if="entry.pnr"
-                                        class="h-4 w-4"
-                                    /><Ticket v-else class="h-4 w-4" />
-                                    {{
-                                        isGeneratingPnr
-                                            ? 'Generating PNR…'
-                                            : entry.pnr
-                                              ? 'PNR generated'
-                                              : 'Generate PNR'
-                                    }}
-                                </Button>
-                                <p
-                                    v-if="entry.pnr_generated_at"
-                                    class="text-xs leading-relaxed text-muted-foreground"
-                                >
-                                    Generated
-                                    {{ formatDate(entry.pnr_generated_at) }}
-                                </p>
-                            </section>
-                            <section
-                                class="min-w-0 space-y-3 border-t border-border pt-5"
-                                aria-labelledby="ticket-code-heading"
-                            >
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <h3
-                                        id="ticket-code-heading"
-                                        class="text-sm font-medium"
-                                    >
-                                        Dummy ticket code
-                                    </h3>
-                                    <span
-                                        v-if="!entry.amadeus_command_block"
-                                        class="text-xs text-muted-foreground"
-                                        >Not generated</span
-                                    >
-                                </div>
-                                <p
-                                    class="text-xs leading-relaxed text-muted-foreground"
-                                >
-                                    Amadeus command block for this itinerary.
-                                </p>
-                                <div
-                                    v-if="entry.amadeus_command_block"
-                                    class="min-w-0 space-y-2"
-                                >
-                                    <pre
-                                        class="max-h-56 min-w-0 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap"
-                                        >{{ entry.amadeus_command_block }}</pre
-                                    >
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        class="w-full gap-2"
-                                        @click="
-                                            copyToClipboard(
-                                                entry.amadeus_command_block,
-                                                'amadeus_command_block',
-                                            )
-                                        "
-                                        ><CheckCircle2
-                                            v-if="
-                                                copiedField ===
-                                                'amadeus_command_block'
-                                            "
-                                            class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
-                                        /><Copy v-else class="h-3.5 w-3.5" />{{
-                                            copiedField ===
-                                            'amadeus_command_block'
-                                                ? 'Copied!'
-                                                : 'Copy all code'
-                                        }}</Button
-                                    >
-                                </div>
-                                <Button
-                                    :disabled="
-                                        isGeneratingAmadeusCode ||
-                                        !hasFlightData
-                                    "
-                                    variant="outline"
-                                    class="w-full gap-2"
-                                    @click="generateAmadeusCode"
-                                    ><Loader2
-                                        v-if="isGeneratingAmadeusCode"
-                                        class="h-4 w-4 animate-spin"
-                                    /><Code v-else class="h-4 w-4" />{{
-                                        isGeneratingAmadeusCode
-                                            ? 'Generating code…'
-                                            : entry.amadeus_command_block
-                                              ? 'Regenerate code'
-                                              : 'Generate dummy ticket code'
-                                    }}</Button
-                                >
-                                <p
-                                    v-if="entry.amadeus_generated_at"
-                                    class="text-xs leading-relaxed text-muted-foreground"
-                                >
-                                    Generated
-                                    {{ formatDate(entry.amadeus_generated_at) }}
-                                </p>
-                            </section>
-                            <p
-                                v-if="!hasFlightData"
-                                class="flex items-start gap-2 rounded-lg bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground"
-                            >
-                                <AlertCircle
-                                    class="mt-0.5 h-4 w-4 shrink-0"
-                                />Flight details are required to generate a PNR
-                                or ticket code.
+                        <summary class="cursor-pointer text-sm font-semibold">
+                            Previous booking record
+                        </summary>
+                        <div class="mt-4 space-y-3">
+                            <dl v-if="entry.pnr" class="text-sm">
+                                <dt class="text-xs text-muted-foreground">
+                                    Previous PNR (historical)
+                                </dt>
+                                <dd class="mt-1 font-mono font-medium [overflow-wrap:anywhere]">
+                                    {{ entry.pnr }}
+                                </dd>
+                            </dl>
+                            <p class="text-xs leading-relaxed text-muted-foreground">
+                                Stored by the previous workflow. This record does not verify the current booking status.
                             </p>
-                        </CardContent>
-                    </Card>
-
+                            <a
+                                v-if="entry.pnr_pdf_path"
+                                :href="`/submissions/entries/${entry.id}/download-pdf`"
+                                class="inline-flex text-sm font-medium underline underline-offset-4"
+                            >Download previous PDF</a>
+                        </div>
+                    </details>
                     <Card class="min-w-0 gap-0 shadow-none">
                         <CardHeader class="pb-4"
                             ><h2

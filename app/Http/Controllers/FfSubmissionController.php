@@ -153,6 +153,8 @@ class FfSubmissionController extends Controller
         return Inertia::render('Submissions/EntryDetails', [
             'entry' => $entry->load('website'),
             'linkedOrder' => fn () => $this->linkedOrder($entry),
+            'itinerary' => fn () => \App\Models\SubmissionItinerary::where('ff_submission_id', $entry->id)->first()?->summary(auth()->user()->can('update', $entry)),
+            'itineraryCanGenerate' => auth()->user()->can('update', $entry),
             'formSchema' => $formSchema ? [
                 'fields' => $formSchema->fields,
             ] : null,

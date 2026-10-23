@@ -99,9 +99,11 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/submissions/forms/{website}/{form_id}', [FfSubmissionController::class, 'formEntries'])->name('submissions.form-entries');
     // Entry details
     Route::get('/submissions/entries/{entry}', [FfSubmissionController::class, 'entryDetails'])->name('submissions.entry-details');
-    Route::post('/submissions/entries/{entry}/generate-amadeus-code', [FfSubmissionController::class, 'generateAmadeusCode'])->name('submissions.generate-amadeus-code');
-    Route::post('/submissions/entries/{submission}/generate-pnr', [FfSubmissionController::class, 'generatePnr'])->name('submissions.generate-pnr');
-    Route::get('/submissions/entries/{entry}/download-pdf', [FfSubmissionController::class, 'downloadPnrPdf'])->name('submissions.download-pdf');
+    Route::post('/submissions/entries/{entry}/generate-amadeus-code', [\App\Http\Controllers\SubmissionItineraryController::class, 'retired'])->name('submissions.generate-amadeus-code');
+    Route::post('/submissions/entries/{entry}/generate-pnr', [\App\Http\Controllers\SubmissionItineraryController::class, 'retired'])->name('submissions.generate-pnr');
+    Route::get('/submissions/entries/{entry}/download-pdf', [\App\Http\Controllers\SubmissionItineraryController::class, 'legacyDownload'])->name('submissions.download-pdf');
+    Route::post('/submissions/entries/{entry}/itinerary', [\App\Http\Controllers\SubmissionItineraryController::class, 'store'])->middleware('throttle:12,1')->name('submissions.itinerary.store');
+    Route::get('/submissions/entries/{entry}/itinerary/pdf', [\App\Http\Controllers\SubmissionItineraryController::class, 'download'])->middleware('throttle:30,1')->name('submissions.itinerary.download');
     Route::delete('/submissions/entries/{entry}', [FfSubmissionController::class, 'destroy'])->name('submissions.destroy');
     
     // Form schema sync routes with rate limiting

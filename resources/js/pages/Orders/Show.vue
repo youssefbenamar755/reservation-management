@@ -17,17 +17,14 @@ import { useToast } from '@/composables/useToast';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { isPhoneField } from '@/lib/whatsapp';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     Calendar,
-    CheckCircle2,
     ClipboardList,
-    Copy,
     CreditCard,
     FileText,
     History,
-    Loader2,
     Mail,
     MapPin,
     Package,
@@ -35,7 +32,6 @@ import {
     Plane,
     Save,
     Tag,
-    Ticket,
     TrendingUp,
     User,
 } from 'lucide-vue-next';
@@ -60,8 +56,6 @@ const form = useForm({
     status: props.order.status,
 });
 
-const isGeneratingAmadeusCode = ref(false);
-const copiedField = ref<string | null>(null);
 const statusUpdateError = ref('');
 
 // Sync form status when order status changes (e.g., after update)
@@ -137,62 +131,6 @@ function updateStatus() {
             toast.error(statusUpdateError.value);
         },
     });
-}
-
-// Check if we have sufficient flight data to generate Amadeus code
-const hasFlightData = computed(() => {
-    return !!flightData.value;
-});
-
-// Generate Amadeus code
-function generateAmadeusCode() {
-    if (!hasFlightData.value) {
-        toast.error('Insufficient flight data to generate ticket');
-        return;
-    }
-
-    if (!fluentSubmission.value) {
-        toast.error('No Fluent Forms submission linked to this order');
-        return;
-    }
-
-    isGeneratingAmadeusCode.value = true;
-
-    router.post(
-        `/orders/${props.order.id}/generate-amadeus-code`,
-        {},
-        {
-            preserveScroll: true,
-            onSuccess: () => {
-                isGeneratingAmadeusCode.value = false;
-                // Reload the page to show the generated code
-                router.reload({ only: ['order', 'fluentSubmission'] });
-            },
-            onError: (errors) => {
-                isGeneratingAmadeusCode.value = false;
-                toast.error(
-                    errors.message || 'Failed to generate Amadeus code',
-                );
-            },
-        },
-    );
-}
-
-function copyToClipboard(text: string, fieldKey: string) {
-    const textToCopy =
-        typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text);
-    navigator.clipboard
-        .writeText(textToCopy)
-        .then(() => {
-            copiedField.value = fieldKey;
-            toast.success('Copied to clipboard');
-            setTimeout(() => {
-                copiedField.value = null;
-            }, 2000);
-        })
-        .catch(() => {
-            toast.error('Failed to copy');
-        });
 }
 
 function formatFieldValue(field: {
@@ -1125,119 +1063,6 @@ const flightData = computed(() => {
                                 </p>
                             </form>
 
-                            <!-- Generate Amadeus Code Section -->
-                            <div
-                                v-if="fluentSubmission && hasFlightData"
-                                class="mt-4 space-y-4 border-t pt-4"
-                            >
-                                <div>
-                                    <h4 class="mb-2 text-sm font-semibold">
-                                        Amadeus Dummy Ticket Code
-                                    </h4>
-                                    <p
-                                        class="mb-3 text-xs text-muted-foreground"
-                                    >
-                                        Generate a full Amadeus-style dummy
-                                        ticket command block
-                                    </p>
-
-                                    <div
-                                        v-if="
-                                            fluentSubmission.amadeus_command_block
-                                        "
-                                        class="mb-4 space-y-3"
-                                    >
-                                        <div
-                                            class="relative rounded-lg border bg-muted/20 p-2 sm:p-3"
-                                        >
-                                            <pre
-                                                class="max-h-48 overflow-y-auto font-mono text-xs break-words whitespace-pre-wrap"
-                                                >{{
-                                                    fluentSubmission.amadeus_command_block
-                                                }}</pre
-                                            >
-                                        </div>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            class="w-full"
-                                            @click="
-                                                copyToClipboard(
-                                                    fluentSubmission.amadeus_command_block,
-                                                    'amadeus_command_block',
-                                                )
-                                            "
-                                        >
-                                            <CheckCircle2
-                                                v-if="
-                                                    copiedField ===
-                                                    'amadeus_command_block'
-                                                "
-                                                class="mr-2 h-3 w-3 text-green-500"
-                                            />
-                                            <Copy v-else class="mr-2 h-3 w-3" />
-                                            {{
-                                                copiedField ===
-                                                'amadeus_command_block'
-                                                    ? 'Copied!'
-                                                    : 'Copy Code'
-                                            }}
-                                        </Button>
-                                        <p
-                                            v-if="
-                                                fluentSubmission.amadeus_generated_at
-                                            "
-                                            class="text-center text-xs text-muted-foreground"
-                                        >
-                                            Generated
-                                            {{
-                                                formatDate(
-                                                    fluentSubmission.amadeus_generated_at,
-                                                )
-                                            }}
-                                        </p>
-                                    </div>
-
-                                    <Button
-                                        :disabled="
-                                            isGeneratingAmadeusCode ||
-                                            !hasFlightData
-                                        "
-                                        @click="generateAmadeusCode"
-                                        :variant="
-                                            fluentSubmission.amadeus_command_block
-                                                ? 'outline'
-                                                : 'default'
-                                        "
-                                        class="w-full"
-                                        size="sm"
-                                    >
-                                        <Loader2
-                                            v-if="isGeneratingAmadeusCode"
-                                            class="mr-2 h-4 w-4 animate-spin"
-                                        />
-                                        <Ticket v-else class="mr-2 h-4 w-4" />
-                                        <span class="hidden sm:inline">
-                                            {{
-                                                isGeneratingAmadeusCode
-                                                    ? 'Generating...'
-                                                    : fluentSubmission.amadeus_command_block
-                                                      ? 'Regenerate Code'
-                                                      : 'Generate Dummy Ticket Code'
-                                            }}
-                                        </span>
-                                        <span class="sm:hidden">
-                                            {{
-                                                isGeneratingAmadeusCode
-                                                    ? 'Generating...'
-                                                    : fluentSubmission.amadeus_command_block
-                                                      ? 'Regenerate'
-                                                      : 'Generate Code'
-                                            }}
-                                        </span>
-                                    </Button>
-                                </div>
-                            </div>
                         </CardContent>
                     </Card>
 
