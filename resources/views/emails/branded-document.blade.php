@@ -109,7 +109,11 @@
                             <td class="email-pad" style="padding:0 32px 28px;">
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f6f7f5" style="width:100%;background-color:#f6f7f5;border:1px solid #e9ece7;border-radius:10px;">
                                     <tr><td style="padding:24px;">
-                                        <p style="margin:0 0 8px;font-size:10px;line-height:16px;font-weight:bold;letter-spacing:1.1px;text-transform:uppercase;color:#647166;">{{ $language === 'fr' ? 'Un moment pour votre avis' : 'A moment for your feedback' }}</p>
+                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                            <tr><td style="padding:0 0 20px;">
+                                                <img class="email-trustpilot-logo" src="https://emailsignature.trustpilot.com/brand/n/1/logo.png" alt="Trustpilot" width="163" height="40" style="display:block;width:163px;height:40px;border:0;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:40px;font-weight:bold;color:#1b1a1b;">
+                                            </td></tr>
+                                        </table>
                                         <h2 style="margin:0 0 8px;font-size:21px;line-height:28px;font-weight:bold;letter-spacing:-0.4px;color:#23352a;">{{ $review['heading'] }}</h2>
                                         <p style="margin:0 0 18px;font-size:14px;line-height:23px;color:#526056;word-wrap:break-word;">{{ $review['body'] }}</p>
                                         <table role="presentation" cellspacing="0" cellpadding="0" border="0">
