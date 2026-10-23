@@ -83,7 +83,7 @@ class BrandedDocumentRenderer
         $templates = $profile->templates ?? self::defaults();
         $this->validateTemplates($templates);
         $copy = array_map(fn ($value) => (string) ($value ?? ''), array_replace(['preheader' => '', 'optional_block' => ''], $templates[$template][$language]));
-        $names = array_map(fn ($file) => self::filename((string) ($file['name'] ?? $file['filename'] ?? 'document.pdf')), $attachments);
+        $names = $template === 'acknowledgement' ? [] : array_map(fn ($file) => self::filename((string) ($file['name'] ?? $file['filename'] ?? 'document.pdf')), $attachments);
         $vars = [
             'brand_name' => $profile->brand_name ?: ($language === 'fr' ? 'Marque à configurer' : 'Brand configuration required'),
             'customer_first_name' => (string) ($values['customer_first_name'] ?? ''), 'order_number' => (string) ($values['order_number'] ?? ''),
@@ -98,7 +98,13 @@ class BrandedDocumentRenderer
         $fill = fn (string $value) => strtr($value, $map);
         $rendered = array_map($fill, $copy);
         $subject = mb_substr(preg_replace('/[\r\n\x00-\x1f\x7f]/', ' ', $rendered['subject']), 0, 250);
-        $attachmentLabel = $language === 'fr' ? count($names).' fichier(s) PDF joints' : count($names).' PDF attachment(s)';
+        $count = count($names);
+        $attachmentLabel = $language === 'fr'
+            ? $count.($count === 1 ? ' fichier PDF joint' : ' fichiers PDF joints')
+            : $count.($count === 1 ? ' PDF attachment' : ' PDF attachments');
+        $statusLabel = $language === 'fr'
+            ? ($template === 'acknowledgement' ? 'Commande reçue' : ($template === 'correction' ? 'Version corrigée' : 'Documents prêts'))
+            : ($template === 'acknowledgement' ? 'Order received' : ($template === 'correction' ? 'Updated documents' : 'Documents ready'));
         if ($template === 'acknowledgement') {
             $attachmentLabel = $language === 'fr' ? 'Documents envoyés séparément après préparation' : 'Documents sent separately after preparation';
         } elseif ($names === []) {
@@ -106,22 +112,28 @@ class BrandedDocumentRenderer
             $attachmentLabel = $language === 'fr' ? 'Aucun PDF sélectionné — aperçu uniquement' : 'No PDF selected — preview only';
             $rendered['body'] = $language === 'fr' ? 'Sélectionnez des fichiers PDF pour prévisualiser le message de livraison.' : 'Select PDF files to preview the document delivery message.';
             $rendered['preheader'] = $attachmentLabel;
+            $rendered['heading'] = $language === 'fr' ? 'Aperçu de vos documents' : 'Your document preview';
+            $statusLabel = $language === 'fr' ? 'Aperçu uniquement' : 'Preview only';
         }
         $footer = $fill((string) $profile->footer);
         $color = fn (?string $value, string $fallback) => preg_match('/^#[0-9a-f]{6}$/i', $value ?? '') ? $value : $fallback;
         $c = ['primary' => $color($profile->primary_color, '#334155'), 'accent' => $color($profile->accent_color, '#334155'), 'background' => $color($profile->background_color, '#f3f4f6'), 'text' => $color($profile->text_color, '#18212f')];
+        $c['hero'] = self::tint($c['primary'], 0.96);
+        $c['soft_accent'] = self::tint($c['accent'], 0.92);
+        $c['heading'] = self::contrastRatio($c['primary'], $c['hero']) >= 4.5 ? $c['primary'] : '#172b35';
+        $c['body'] = self::contrastRatio($c['text'], '#ffffff') >= 4.5 ? $c['text'] : '#263747';
+        $c['badge'] = self::contrastRatio($c['accent'], $c['soft_accent']) >= 4.5 ? $c['accent'] : '#263747';
+        $c['button_text'] = self::contrastRatio($c['accent'], '#ffffff') >= self::contrastRatio($c['accent'], '#000000') ? '#ffffff' : '#000000';
         // Remote assets are never fetched by WP Hub. Only safe public HTTPS URLs are embedded.
-        $logo = self::safePublicUrl($profile->logo_url) ? '<img src="'.e($profile->logo_url).'" alt="'.e($vars['brand_name']).'" width="144" style="display:block;max-width:144px;max-height:80px;height:auto;margin-bottom:16px;border:0">' : '';
-        $fileList = $names === [] ? '' : '<ul style="margin:12px 0 0;padding-left:20px">'.implode('', array_map(fn ($name) => '<li style="padding:4px 0;word-break:break-word">'.e($name).'</li>', $names)).'</ul>';
-        $support = e((string) $profile->support_email).($profile->support_phone ? '<br>'.e($profile->support_phone) : '');
-        if (self::safePublicUrl($profile->website_url)) {
-            $support .= '<br><a href="'.e($profile->website_url).'" style="color:'.$c['text'].';text-decoration:underline">'.e($profile->website_url).'</a>';
-        }
-        $optional = trim($rendered['optional_block'] ?? '') === '' ? '' : '<div style="margin-top:24px;font-size:14px;line-height:1.6">'.nl2br(e($rendered['optional_block'])).'</div>';
+        $logoUrl = self::safePublicUrl($profile->logo_url) ? $profile->logo_url : null;
+        $contacts = self::footerContacts($profile, $footer);
+        $paragraphs = self::paragraphs($rendered['body']);
+        $optionalParagraphs = self::paragraphs($rendered['optional_block'] ?? '');
+        $footerParagraphs = self::paragraphs($footer);
         // Invite feedback after document delivery, using only this website's saved
         // profile. The rendered HTML/text are frozen in the reviewed send snapshot.
         $reviewUrl = $template !== 'acknowledgement' && $names !== [] ? TrustpilotReviewLink::actionUrl($profile) : null;
-        $reviewHtml = '';
+        $review = null;
         $reviewText = '';
         if ($reviewUrl) {
             $reviewHeading = $language === 'fr' ? 'Votre expérience compte' : 'Your experience matters';
@@ -129,11 +141,11 @@ class BrandedDocumentRenderer
                 ? 'Partagez votre expérience avec '.$vars['brand_name'].' sur Trustpilot. Votre avis aide les autres voyageurs.'
                 : 'Share your experience with '.$vars['brand_name'].' on Trustpilot. Your feedback helps other travellers.';
             $reviewButton = $language === 'fr' ? 'Donner mon avis sur Trustpilot' : 'Review us on Trustpilot';
-            $reviewHtml = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #e2e8f0;background:#f8fafc"><tr><td style="padding:20px"><h2 style="margin:0 0 8px;font-size:18px;line-height:1.4;color:#18212f">'.e($reviewHeading).'</h2><p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#334155">'.e($reviewBody).'</p><table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="'.$c['primary'].'" style="background:'.$c['primary'].';border-radius:6px"><a href="'.e($reviewUrl).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:13px 18px;border:1px solid '.$c['primary'].';border-radius:6px;font-size:14px;font-weight:bold;line-height:1.4;color:#ffffff;text-decoration:none">'.e($reviewButton).'</a></td></tr></table></td></tr></table>';
+            $review = ['heading' => $reviewHeading, 'body' => $reviewBody, 'button' => $reviewButton, 'url' => $reviewUrl];
             $reviewText = $reviewHeading."\n".$reviewBody."\n".$reviewButton.': '.$reviewUrl;
         }
-        $html = '<!doctype html><html lang="'.$language.'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:'.$c['background'].';color:'.$c['text'].';font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">'.e($rendered['preheader']).'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:'.$c['background'].'"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-top:5px solid '.$c['primary'].'"><tr><td style="padding:28px 24px">'.$logo.'<div style="font-size:18px;font-weight:bold;color:'.$c['primary'].'">'.e($vars['brand_name']).'</div><h1 style="font-size:27px;line-height:1.3;margin:24px 0 8px">'.e($rendered['heading']).'</h1><p style="font-size:13px;margin:0 0 24px">'.($language === 'fr' ? 'Commande ' : 'Order ').e($vars['order_number']).'</p><div style="padding:18px;background:'.$c['background'].';border-left:3px solid '.$c['accent'].';font-size:15px;line-height:1.6"><strong>'.e($attachmentLabel).'</strong>'.$fileList.'</div><div style="font-size:16px;line-height:1.7;margin-top:24px">'.nl2br(e($rendered['body'])).'</div>'.$optional.$reviewHtml.'<div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:20px;font-size:13px;line-height:1.6">'.nl2br(e($footer)).'<p style="margin:12px 0 0">'.$support.'</p></div></td></tr></table></td></tr></table></body></html>';
-        $text = implode("\n\n", array_filter([$vars['brand_name'], $rendered['heading'], ($language === 'fr' ? 'Commande ' : 'Order ').$vars['order_number'], $attachmentLabel, implode("\n", $names), $rendered['body'], $rendered['optional_block'] ?? '', $reviewText, $footer, $profile->support_email, $profile->support_phone, $profile->website_url]));
+        $html = view('emails.branded-document', compact('language', 'template', 'vars', 'rendered', 'names', 'attachmentLabel', 'statusLabel', 'c', 'logoUrl', 'paragraphs', 'optionalParagraphs', 'footerParagraphs', 'contacts', 'review'))->render();
+        $text = implode("\n\n", array_filter([$vars['brand_name'], $rendered['heading'], ($language === 'fr' ? 'Commande ' : 'Order ').$vars['order_number'], $attachmentLabel, implode("\n", $names), $rendered['body'], $rendered['optional_block'] ?? '', $reviewText, $footer, implode("\n", array_column($contacts, 'text'))]));
 
         return compact('subject', 'html', 'text', 'language');
     }
@@ -144,6 +156,50 @@ class BrandedDocumentRenderer
         $name = preg_replace('/[\x00-\x1f\x7f<>"|:*?]/u', '', $name);
 
         return mb_substr(trim($name) ?: 'document.pdf', 0, 150);
+    }
+
+    private static function paragraphs(string $text): array
+    {
+        return array_values(array_filter(preg_split('/\R[\h\r\n]*\R/u', trim($text)) ?: [], fn ($paragraph) => trim($paragraph) !== ''));
+    }
+
+    /** Blend with white; the original brand accent remains unchanged on the CTA. */
+    private static function tint(string $color, float $white): string
+    {
+        $channels = array_map(fn ($offset) => (int) round(hexdec(substr($color, $offset, 2)) * (1 - $white) + 255 * $white), [1, 3, 5]);
+
+        return sprintf('#%02x%02x%02x', ...$channels);
+    }
+
+    /** Keep custom footer copy verbatim and append only contact details it lacks. */
+    private static function footerContacts(WebsiteDocumentProfile $profile, string $footer): array
+    {
+        $contacts = [];
+        $normalizedFooter = mb_strtolower($footer);
+        $email = trim((string) $profile->support_email);
+        if ($email !== '' && ! str_contains($normalizedFooter, mb_strtolower($email))) {
+            $emailUrl = null;
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) && ! preg_match('/[\r\n]/', $email)) {
+                $separator = strrpos($email, '@');
+                $emailUrl = 'mailto:'.rawurlencode(substr($email, 0, $separator)).'@'.rawurlencode(substr($email, $separator + 1));
+            }
+            $contacts[] = ['text' => $email, 'url' => $emailUrl];
+        }
+        $phone = trim((string) $profile->support_phone);
+        $phoneDigits = preg_replace('/\D/', '', $phone);
+        preg_match_all('/\+?\d[\d\h().-]{4,}\d/u', $footer, $matches);
+        $footerPhones = array_map(fn ($match) => preg_replace('/\D/', '', $match), $matches[0]);
+        if ($phone !== '' && ! str_contains($normalizedFooter, mb_strtolower($phone)) && ($phoneDigits === '' || ! in_array($phoneDigits, $footerPhones, true))) {
+            $contacts[] = ['text' => $phone, 'url' => null];
+        }
+        $website = trim((string) $profile->website_url);
+        $host = preg_replace('/^www\./i', '', (string) parse_url($website, PHP_URL_HOST));
+        if (self::safePublicUrl($website) && ! str_contains($normalizedFooter, mb_strtolower($website))
+            && ($host === '' || ! preg_match('/(?<![a-z0-9.@-])(?:www\.)?'.preg_quote(mb_strtolower($host), '/').'(?![a-z0-9.-])/u', $normalizedFooter))) {
+            $contacts[] = ['text' => $website, 'url' => $website];
+        }
+
+        return $contacts;
     }
 
     /** WCAG relative luminance; decorative accent colours need not be used for text. */

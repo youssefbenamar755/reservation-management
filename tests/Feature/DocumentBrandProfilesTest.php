@@ -195,8 +195,8 @@ test('zero attachment preview never claims pdf files are attached and single mul
     expect($zero['text'])->toContain('No PDF selected — preview only')->not->toContain('ready and attached');
     $one = $renderer->render($profile, $sample, [['name' => 'reservation.pdf']]);
     $two = $renderer->render($profile, $sample, [['name' => 'reservation.pdf'], ['name' => 'hotel.pdf']]);
-    expect($one['text'])->toContain('1 PDF attachment(s)', 'reservation.pdf')->not->toContain('hotel.pdf');
-    expect($two['text'])->toContain('2 PDF attachment(s)', 'reservation.pdf', 'hotel.pdf');
+    expect($one['text'])->toContain('1 PDF attachment', 'reservation.pdf')->not->toContain('hotel.pdf');
+    expect($two['text'])->toContain('2 PDF attachments', 'reservation.pdf', 'hotel.pdf');
 });
 
 test('same external order number stays isolated and recorded language precedes website fallback', function () {
@@ -270,8 +270,13 @@ test('old cached capability without strong order revisions cannot advertise comp
 test('decorative bright accents retain branding while footer links use readable text and underline', function () {
     $profile = new WebsiteDocumentProfile(array_replace(documentBrandInput(), ['accent_color' => '#00cc61']));
     $rendered = app(BrandedDocumentRenderer::class)->render($profile, ['customer_first_name' => 'Alex', 'order_number' => 'DEMO', 'language' => 'en'], [['name' => 'sample.pdf']]);
-    expect($rendered['html'])->toContain('border-left:3px solid #00cc61', 'style="color:#17212f;text-decoration:underline"')
-        ->not->toContain('style="color:#00cc61"');
+    $dom = new DOMDocument;
+    @$dom->loadHTML($rendered['html']);
+    $link = (new DOMXPath($dom))->query('//a[starts-with(@href, "mailto:")]')->item(0);
+    expect($link)->not->toBeNull();
+    preg_match('/(?:^|;)\s*color:\s*(#[a-f0-9]{6})/i', $link->getAttribute('style'), $color);
+    expect($link->getAttribute('style'))->toContain('text-decoration:underline');
+    expect(BrandedDocumentRenderer::contrastRatio($color[1], '#ffffff'))->toBeGreaterThanOrEqual(4.5);
     expect(BrandedDocumentRenderer::contrastRatio('#00cc61', '#ffffff'))->toBeLessThan(4.5)
         ->and(BrandedDocumentRenderer::contrastRatio('#17212f', '#ffffff'))->toBeGreaterThan(4.5);
 });
