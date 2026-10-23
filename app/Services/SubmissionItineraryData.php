@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use DateTimeImmutable;
+use DateTimeZone;
+
 class SubmissionItineraryData
 {
     /** Extract only supplied facts; this method never searches for or books flights. */
@@ -29,22 +32,16 @@ class SubmissionItineraryData
                 if (! is_array($itinerary)) {
                     continue;
                 }
-                $segments = [];
-                foreach (is_array($itinerary['segments'] ?? null) ? $itinerary['segments'] : [] as $segment) {
-                    if (is_array($segment) && ($normalized = $this->segment($segment, $offer)) !== null) {
-                        $segments[] = $normalized;
-                    }
-                }
-                if ($segments !== []) {
-                    $offerTrips[] = $segments;
+                if (($trip = $this->trip($itinerary, $offer)) !== null) {
+                    $offerTrips[] = $trip;
                 }
             }
             // The same selected offer can be saved under more than one form field.
             $key = json_encode($offerTrips, JSON_INVALID_UTF8_SUBSTITUTE);
             if (! isset($seenOffers[$key])) {
                 $seenOffers[$key] = true;
-                foreach ($offerTrips as $segments) {
-                    $trips[] = ['label' => 'Flight '.(count($trips) + 1), 'segments' => $segments];
+                foreach ($offerTrips as $trip) {
+                    $trips[] = ['label' => 'Flight '.(count($trips) + 1)] + $trip;
                 }
             }
         }
@@ -172,6 +169,46 @@ class SubmissionItineraryData
         return null;
     }
 
+    private function trip(array $itinerary, array $offer): ?array
+    {
+        $rawSegments = array_values(is_array($itinerary['segments'] ?? null) ? $itinerary['segments'] : []);
+        $segments = [];
+        $totalSeconds = 0;
+        $canDeriveDuration = true;
+        foreach ($rawSegments as $index => $segment) {
+            if (! is_array($segment) || ($normalized = $this->segment($segment, $offer)) === null) {
+                $canDeriveDuration = false;
+
+                continue;
+            }
+            $seconds = $this->durationSeconds($segment['duration'] ?? null);
+            if ($seconds === null) {
+                $canDeriveDuration = false;
+            } else {
+                $totalSeconds += $seconds;
+            }
+            if ($index < count($rawSegments) - 1) {
+                // Only adjacent submitted segments may form a connection. Never
+                // bridge an empty/malformed segment that was omitted from display.
+                $next = $rawSegments[$index + 1];
+                $layover = is_array($next) ? $this->layover($segment, $next) : null;
+                if ($layover === null) {
+                    $canDeriveDuration = false;
+                } else {
+                    $normalized['layover_after'] = $layover['details'];
+                    $totalSeconds += $layover['seconds'];
+                }
+            }
+            $segments[] = $normalized;
+        }
+
+        return $segments === [] ? null : [
+            'duration' => $this->duration($itinerary['duration'] ?? null)
+                ?? ($canDeriveDuration ? $this->elapsedDuration($totalSeconds) : null),
+            'segments' => $segments,
+        ];
+    }
+
     private function segment(array $segment, array $offer): ?array
     {
         $departure = $this->point(is_array($segment['departure'] ?? null) ? $segment['departure'] : []);
@@ -188,10 +225,15 @@ class SubmissionItineraryData
             'airline' => $this->field($segment, ['airline', 'airlineName', 'carrierName'])
                 ?? ($carrier !== null ? $this->text($offer['dictionaries']['carriers'][$carrier] ?? null) : null),
             'flight_number' => $number,
+            'operating_carrier' => (is_array($segment['operating'] ?? null)
+                ? $this->field($segment['operating'], ['carrierCode', 'carrier_code']) : null)
+                ?? $this->field($segment, ['operating_carrier', 'operatingCarrierCode']),
+            'airline_reference' => $this->field($segment, ['bookingReference', 'airline_reference', 'booking_reference']),
             'departure' => $departure, 'arrival' => $arrival,
             'duration' => $this->duration($segment['duration'] ?? null),
             'baggage' => $this->baggage($segment['baggageAllowance'] ?? null) ?? $fare['baggage'],
             'cabin' => $this->text($segment['cabin'] ?? null) ?? $fare['cabin'],
+            'layover_after' => null,
         ];
         $facts = array_merge($departure, array_values($arrival), array_values(array_diff_key($normalized, ['departure' => true, 'arrival' => true])));
 
@@ -211,6 +253,121 @@ class SubmissionItineraryData
             'gate' => $this->text($point['gate'] ?? null, true),
             'timezone' => $this->text($point['timezone'] ?? null),
         ];
+    }
+
+    private function layover(array $segment, array $next): ?array
+    {
+        if (! is_array($segment['arrival'] ?? null) || ! is_array($next['departure'] ?? null)) {
+            return null;
+        }
+        $arrival = $this->point($segment['arrival']);
+        $departure = $this->point($next['departure']);
+        if ($arrival['airport_code'] !== null && $departure['airport_code'] !== null) {
+            $sameAirport = $arrival['airport_code'] === $departure['airport_code'];
+        } else {
+            $sameAirport = $arrival['airport_name'] !== null && $departure['airport_name'] !== null
+                && mb_strtolower($arrival['airport_name']) === mb_strtolower($departure['airport_name']);
+        }
+        if (! $sameAirport) {
+            return null;
+        }
+        $arrivedAt = $this->instant($segment['arrival']);
+        $departsAt = $this->instant($next['departure']);
+        if ($arrivedAt === null || $departsAt === null || $departsAt < $arrivedAt) {
+            return null;
+        }
+        $seconds = $departsAt - $arrivedAt;
+
+        return ['seconds' => $seconds, 'details' => [
+            'duration' => $this->elapsedDuration($seconds),
+            'airport_code' => $arrival['airport_code'] ?? $departure['airport_code'],
+            'airport_name' => $arrival['airport_name'] ?? $departure['airport_name'],
+        ]];
+    }
+
+    private function instant(array $point): ?int
+    {
+        $value = $this->text($point['at'] ?? $point['date'] ?? null);
+        // A date alone or a fractional instant we cannot preserve exactly is
+        // insufficient for elapsed-time arithmetic. Displayed source facts stay intact.
+        if ($value === null || $this->dateTime($value)[1] === null
+            || ! preg_match('/\A(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2})(?:\.0+)?)?(Z|[+-]\d{2}:\d{2})?\z/D', $value, $parts)) {
+            return null;
+        }
+        $local = $parts[1].' '.$parts[2].':'.(($parts[3] ?? '') !== '' ? $parts[3] : '00');
+        $wallTimestamp = (new DateTimeImmutable($local, new DateTimeZone('UTC')))->getTimestamp();
+        $offset = $parts[4] ?? null;
+        if ($offset !== null) {
+            $seconds = $this->offsetSeconds($offset);
+
+            return $seconds === null ? null : $wallTimestamp - $seconds;
+        }
+        $timezone = $this->text($point['timezone'] ?? null);
+        if ($timezone === null) {
+            return null;
+        }
+        if (($seconds = $this->offsetSeconds($timezone)) !== null) {
+            return $wallTimestamp - $seconds;
+        }
+        // Abbreviations such as CST are ambiguous. Use only a supplied named
+        // timezone, and reject both repeated and nonexistent DST local times.
+        if ($timezone !== 'UTC' && ! str_contains($timezone, '/')) {
+            return null;
+        }
+        try {
+            $zone = new DateTimeZone($timezone);
+        } catch (\Exception) {
+            return null;
+        }
+        $transitions = $zone->getTransitions($wallTimestamp - 172800, $wallTimestamp + 172800);
+        if ($transitions === false) {
+            return null;
+        }
+        $matches = [];
+        foreach (array_unique(array_column($transitions, 'offset')) as $candidateOffset) {
+            $candidate = $wallTimestamp - $candidateOffset;
+            if ((new DateTimeImmutable('@'.$candidate))->setTimezone($zone)->format('Y-m-d H:i:s') === $local) {
+                $matches[] = $candidate;
+            }
+        }
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    private function offsetSeconds(string $offset): ?int
+    {
+        if ($offset === 'Z') {
+            return 0;
+        }
+        if (! preg_match('/\A([+-])(\d{2}):(\d{2})\z/D', $offset, $parts)
+            || (int) $parts[2] > 14 || (int) $parts[3] > 59
+            || ((int) $parts[2] === 14 && (int) $parts[3] !== 0)) {
+            return null;
+        }
+
+        return ($parts[1] === '-' ? -1 : 1) * ((int) $parts[2] * 3600 + (int) $parts[3] * 60);
+    }
+
+    private function durationSeconds(mixed $value): ?int
+    {
+        $value = $this->text($value);
+        if ($value === null || ! preg_match('/\AP(?:(\d{1,7})D)?(?:T(?:(\d{1,7})H)?(?:(\d{1,7})M)?(?:(\d{1,7})S)?)?\z/D', $value, $parts)
+            || ! preg_match('/\d/', $value)) {
+            return null;
+        }
+
+        return (int) ($parts[1] ?? 0) * 86400 + (int) ($parts[2] ?? 0) * 3600
+            + (int) ($parts[3] ?? 0) * 60 + (int) ($parts[4] ?? 0);
+    }
+
+    private function elapsedDuration(int $seconds): string
+    {
+        $hours = intdiv($seconds, 3600);
+        $minutes = intdiv($seconds % 3600, 60);
+        $remainingSeconds = $seconds % 60;
+
+        return trim(($hours ? $hours.'h ' : '').($minutes ? $minutes.'m ' : '')
+            .($remainingSeconds ? $remainingSeconds.'s' : ($seconds === 0 ? '0m' : '')));
     }
 
     private function commonFare(array $offer, mixed $id): array
@@ -244,9 +401,10 @@ class SubmissionItineraryData
         [$date, $time] = $this->dateTime($this->field($response, ['flight_departure', 'departure_date', 'flight_departure_date']));
         $from['date'] = $date;
         $from['time'] = $time;
-        $blank = ['carrier_code' => null, 'airline' => null, 'flight_number' => null, 'duration' => null, 'baggage' => null, 'cabin' => null];
+        $blank = ['carrier_code' => null, 'airline' => null, 'flight_number' => null, 'operating_carrier' => null,
+            'airline_reference' => null, 'duration' => null, 'baggage' => null, 'cabin' => null, 'layover_after' => null];
         $outbound = $blank + ['departure' => $from, 'arrival' => $to];
-        $trips = [['label' => 'Outbound', 'segments' => [$outbound]]];
+        $trips = [['label' => 'Outbound', 'duration' => null, 'segments' => [$outbound]]];
         // These are the existing forms' return-date fields; do not infer an arrival time.
         [$returnDate, $returnTime] = $this->dateTime($this->field($response, ['return_date', 'flight_return', 'flight_return_date', 'flight_arrival']));
         if ($returnDate !== null) {
@@ -255,7 +413,7 @@ class SubmissionItineraryData
             $returnFrom['time'] = $returnTime;
             $returnTo = $from;
             $returnTo['date'] = $returnTo['time'] = null;
-            $trips[] = ['label' => 'Return', 'segments' => [$blank + ['departure' => $returnFrom, 'arrival' => $returnTo]]];
+            $trips[] = ['label' => 'Return', 'duration' => null, 'segments' => [$blank + ['departure' => $returnFrom, 'arrival' => $returnTo]]];
         }
 
         return $trips;
