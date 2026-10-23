@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('auth')->prefix('settings/email-documents')->name('document-settings.')->group(function () {
     Route::get('/', [DocumentSettingsController::class, 'index'])->name('index');
     Route::put('/{website}', [DocumentSettingsController::class, 'update'])->middleware('throttle:20,1,document-settings')->name('update');
+    Route::patch('/{website}/review-link', [DocumentSettingsController::class, 'reviewLink'])->middleware('throttle:20,1,document-review-link')->name('review-link');
     Route::post('/{website}/disable', [DocumentSettingsController::class, 'disable'])->middleware('throttle:20,1,document-disable')->name('disable');
     Route::post('/{website}/preview', [DocumentSettingsController::class, 'preview'])->middleware('throttle:30,1,document-sample')->name('preview');
     Route::post('/{website}/restore', [DocumentSettingsController::class, 'restore'])->name('restore');

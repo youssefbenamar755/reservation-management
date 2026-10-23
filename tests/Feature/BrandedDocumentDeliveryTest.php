@@ -109,6 +109,31 @@ test('branded delivery uses exact approved private files and snapshots brand lan
     expect($this->sentCount)->toBe(0);
 });
 
+test('review link changes preserve reviewed MIME and affect only newly prepared document emails', function () {
+    $this->site->update(['base_url' => 'https://reservationpourvisa.com']);
+    $url = 'https://www.trustpilot.com/review/reservationpourvisa.com';
+    $this->profile->update(['trustpilot_url' => $url]);
+    $docs = brandedUpload($this);
+    $original = brandedPrepare($this, $docs);
+    $originalMime = $original->mime;
+    expect($original->snapshot['html'])->toContain('https://www.trustpilot.com/evaluate/reservationpourvisa.com')
+        ->and($original->snapshot['text'])->toContain('Review us on Trustpilot');
+
+    $this->patchJson('/settings/email-documents/'.$this->site->id.'/review-link', [
+        'trustpilot_url' => null, 'expected_trustpilot_url' => $url,
+    ])->assertOk();
+    $next = brandedPrepare($this, $docs);
+    expect($next->id)->not->toBe($original->id)
+        ->and($next->snapshot['html'])->not->toContain('Trustpilot')
+        ->and($original->fresh()->mime)->toBe($originalMime)
+        ->and($this->profile->fresh()->config_version)->toBe(1)
+        ->and($this->profile->fresh()->brand_sync_version)->toBe(1);
+
+    brandedSend($this, $original)->assertOk()->assertJsonPath('delivery.status', 'sent');
+    expect($this->sentCount)->toBe(1)->and($this->mime)->toBe($originalMime);
+    Bus::assertNothingDispatched();
+});
+
 test('identical external order numbers cannot cross website document preview download or history boundaries', function () {
     $documents = brandedUpload($this);
     $delivery = brandedPrepare($this, $documents);
