@@ -62,6 +62,7 @@ class BrandedDocumentDelivery
         if ($documents->count() !== count($ids) || $documents->isEmpty() || $documents->count() > 5 || $documents->sum('size') > OrderEmailComposer::LIMITS['max_total_bytes']) {
             throw ValidationException::withMessages(['document_ids' => 'Select one to five approved PDFs belonging to this exact order and customer, totalling at most 10 MiB.']);
         }
+        app(GeneratedItineraryAttachment::class)->assertCurrent($order, $actor, $documents);
         if (strcasecmp($values['recipient'], $order->customer_email ?? '') !== 0 && ! filled($values['recipient_override_reason'] ?? null)) {
             throw ValidationException::withMessages(['recipient_override_reason' => 'Explain and confirm the change from the recorded customer email.']);
         }
@@ -101,6 +102,7 @@ class BrandedDocumentDelivery
             if ($locked->website_id !== $order->website_id || $locked->customer_email !== $snapshot['original_recipient']) {
                 throw ValidationException::withMessages(['order' => 'The order changed. Reload and prepare again.']);
             }
+            app(GeneratedItineraryAttachment::class)->assertSnapshot($locked, $actor, $snapshot);
             $prior = null;
             if (in_array($mode, ['resend', 'correction'], true)) {
                 $prior = OrderEmailDelivery::whereKey($values['previous_delivery_id'] ?? null)->where('website_id', $order->website_id)
@@ -167,6 +169,7 @@ class BrandedDocumentDelivery
                 throw ValidationException::withMessages(['delivery' => 'The configuration or customer changed. Prepare a new preview.']);
             }
             $this->assertApprovedDocuments($lockedOrder, $snapshot);
+            app(GeneratedItineraryAttachment::class)->assertSnapshot($lockedOrder, $actor, $snapshot);
             $current->update(['user_id' => $actor->id, 'status' => 'sending', 'sending_at' => now(), 'send_attempts' => $current->send_attempts + 1,
                 'result_message' => 'Sending the approved document email.']);
             app(ActionHistoryRecorder::class)->beginEmail($current, $lockedOrder);
@@ -277,6 +280,7 @@ class BrandedDocumentDelivery
                 throw new GmailDeliveryException('Completion suppression is no longer verified. Check the companion plugin before preparing a new preview.');
             }
             $this->assertApprovedDocuments($currentOrder, $delivery->snapshot);
+            app(GeneratedItineraryAttachment::class)->assertSnapshot($currentOrder, $actor, $delivery->snapshot);
         }, 3);
     }
 

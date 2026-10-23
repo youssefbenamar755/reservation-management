@@ -26,10 +26,11 @@ const ui = {
     }, 'Itinerary document'),
   }) },
   '@/components/OrderEmailComposer.vue': { default: vue.defineComponent({
-    props: ['orderId', 'orderNumber'],
+    props: ['orderId', 'orderNumber', 'submissionId'],
     setup: (props) => () => vue.h('button', {
       'data-email-order': props.orderId,
       'data-email-order-number': props.orderNumber,
+      'data-email-submission': props.submissionId,
     }, 'Email documents'),
   }) },
   '@/components/OrderStatusControl.vue': { default: vue.defineComponent({
@@ -283,6 +284,7 @@ test('linked order uses the local order ID for its link and control while submis
   assert.match(html, /Order #5401/)
   assert.match(html, /data-order-control="73" data-order-number="5401" data-website-name="Fixture website"/)
   assert.match(html, /data-email-order="73" data-email-order-number="5401"/)
+  assert.match(html, /data-email-submission="42"/)
   assert.match(html, />processing<\/button>/)
   assert.match(html, /Submission: read/)
   assert.ok(!html.includes('No linked order'))

@@ -1297,6 +1297,7 @@ const technicalMetadata = computed(() => [
                                         :key="`entry-email-${entry.id}-${linkedOrder.id}`"
                                         :order-id="linkedOrder.id"
                                         :order-number="linkedOrder.wp_order_id"
+                                        :submission-id="entry.id"
                                     />
                                 </div>
                                 <p

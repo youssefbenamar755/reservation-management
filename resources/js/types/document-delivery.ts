@@ -69,6 +69,26 @@ export interface ApprovedOrderDocument {
     sha256: string;
     version: number;
     approved: boolean;
+    source?: 'submission_itinerary';
+    submission_id?: number;
+    source_version?: string;
+    download_url?: string;
+}
+export interface GeneratedItinerarySource {
+    submission_id: number;
+    submission_number: string | number;
+    reference: string;
+    reference_type: 'internal' | 'external';
+    external_pnr: string | null;
+    generated_at: string;
+    source_version: string;
+    name: string;
+    download_url: string;
+}
+export interface ItineraryAttachmentContext {
+    available: boolean;
+    reason: string | null;
+    source: GeneratedItinerarySource | null;
 }
 export interface DocumentDeliveryOutcome {
     id: string;

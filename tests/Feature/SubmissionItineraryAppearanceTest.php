@@ -13,7 +13,7 @@ test('rendering uses packaged carrier artwork and ignores all website or submitt
     $document = [
         'reference' => 'ITN-SAMPLE', 'reference_type' => 'internal',
         'website' => ['name' => 'Hidden Website Brand', 'host' => 'hidden.example', 'logo_data_uri' => 'data:image/png;base64,untrusted'],
-        'agency' => ['name' => 'Example Agency', 'address' => '10 Sample Avenue'],
+        'agency' => ['name' => 'Example Agency', 'address' => '10 Sample Avenue', 'consultant_name' => 'Example Consultant'],
         'passengers' => [['first_name' => 'Alex', 'last_name' => 'Example', 'name' => 'Alex Example']],
         'trips' => [['label' => 'Outbound', 'segments' => [
             ['carrier_code' => 'AF', 'airline' => 'Air France', 'flight_number' => 'AF100', 'logo_url' => 'https://untrusted.example/track', 'departure' => ['airport_code' => 'CDG'], 'arrival' => ['airport_code' => 'CMN']],
@@ -31,14 +31,16 @@ test('rendering uses packaged carrier artwork and ignores all website or submitt
     }
     $html = view('pdf.submission-itinerary', $captured)->render();
     expect($html)->not->toContain('Hidden Website Brand', 'hidden.example', 'untrusted.example', 'data:image/png;base64,untrusted')
-        ->toContain('Example Agency', '10 Sample Avenue', 'Alex', 'Example');
+        ->toContain('Example Agency', 'Example Consultant', '10 Sample Avenue', 'Alex', 'Example');
+    expect(substr_count($html, '10 Sample Avenue'))->toBe(2);
     Http::assertNothingSent();
 });
 
 test('an external PNR remains operator supplied and internal reference never becomes an airline reference', function () {
     $base = ['reference' => 'ITN-SAMPLE', 'passengers' => [], 'trips' => [], 'airlineLogoDataUris' => [], 'flightIconDataUris' => []];
     $internal = view('pdf.submission-itinerary', ['document' => $base + ['reference_type' => 'internal'], 'airlineLogoDataUris' => [], 'flightIconDataUris' => []])->render();
-    expect($internal)->toContain('ITN-SAMPLE')->not->toContain('Booked Itinerary');
+    expect($internal)->toContain('ITN-SAMPLE', 'Itinerary reference', 'Travel plan only')->not->toContain('Booked Itinerary', 'PNR-ITN');
     $external = view('pdf.submission-itinerary', ['document' => $base + ['reference_type' => 'external', 'external_pnr' => 'ABC123', 'booking_source' => 'Example Booking System'], 'airlineLogoDataUris' => [], 'flightIconDataUris' => []])->render();
-    expect($external)->toContain('ABC123', 'Example Booking System')->not->toContain('Booked Itinerary');
+    expect($external)->toContain('PNR-ABC123', 'Example Booking System', 'Booked Itinerary', 'Booking PNR supplied by the operator')
+        ->not->toContain('Travel plan only', 'Itinerary reference:');
 });

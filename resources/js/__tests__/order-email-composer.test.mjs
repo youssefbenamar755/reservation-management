@@ -9,6 +9,22 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const vue = require('vue');
+const itineraryModule = { exports: {} };
+runInNewContext(
+    ts.transpileModule(
+        readFileSync(
+            new URL('../lib/itineraryAttachments.ts', import.meta.url),
+            'utf8',
+        ),
+        {
+            compilerOptions: {
+                module: ts.ModuleKind.CommonJS,
+                target: ts.ScriptTarget.ES2022,
+            },
+        },
+    ).outputText,
+    { module: itineraryModule, exports: itineraryModule.exports },
+);
 const source = readFileSync(
     new URL('../components/OrderEmailComposer.vue', import.meta.url),
     'utf8',
@@ -80,12 +96,44 @@ const validationFailure = (errors) => ({
     isAxiosError: true,
     response: { status: 422, data: { errors } },
 });
+const itinerary = (version = 'b'.repeat(64)) => ({
+    available: true,
+    reason: null,
+    source: {
+        submission_id: 77,
+        submission_number: 301,
+        reference: 'ITN-301',
+        reference_type: 'internal',
+        external_pnr: null,
+        generated_at: '2026-10-23T12:00:00Z',
+        source_version: version,
+        name: 'Travel-Itinerary-301.pdf',
+        download_url: '/submissions/entries/77/itinerary',
+    },
+});
+const itineraryDocument = (overrides = {}) => ({
+    id: uuid,
+    name: 'Travel-Itinerary-301.pdf',
+    size: 40,
+    sha256: 'c'.repeat(64),
+    version: 1,
+    approved: true,
+    source: 'submission_itinerary',
+    submission_id: 77,
+    source_version: itinerary().source.source_version,
+    download_url: `/orders/10/document-deliveries/documents/${uuid}`,
+    ...overrides,
+});
 
-function harness(t) {
+function harness(t, initialProps = {}) {
     const calls = [];
     const hooks = {};
     const events = [];
-    const props = vue.reactive({ orderId: 10, orderNumber: 1001 });
+    const props = vue.reactive({
+        orderId: 10,
+        orderNumber: 1001,
+        ...initialProps,
+    });
     const request = (method, url, data, options) =>
         new Promise((resolve, reject) =>
             calls.push({ method, url, data, options, resolve, reject }),
@@ -104,6 +152,8 @@ function harness(t) {
         AbortController,
         FormData,
         require: (name) => {
+            if (name === '@/lib/itineraryAttachments')
+                return itineraryModule.exports;
             if (name === 'axios') return { default: axios };
             if (name === 'vue')
                 return {
@@ -114,7 +164,10 @@ function harness(t) {
                 };
             if (name.startsWith('@/components/ui/'))
                 return new Proxy({}, { get: () => wrapper });
-            if (name === '@/components/DocumentDeliveryComposer.vue')
+            if (
+                name === '@/components/DocumentDeliveryComposer.vue' ||
+                name === '@/components/GeneratedItineraryAttachment.vue'
+            )
                 return { default: wrapper };
             return require(name);
         },
@@ -148,6 +201,174 @@ function harness(t) {
     };
     return { state, props, calls, hooks, events, respond, open, prepare };
 }
+
+test('itinerary origin is scoped, add is explicit and single-flight, and mixed PDFs are reviewed before any send', async (t) => {
+    const { state, calls, respond, open } = harness(t, { submissionId: 77 });
+    await open(
+        context({
+            itinerary_attachment: itinerary(),
+            documents: [itineraryDocument()],
+        }),
+    );
+    assert.equal(calls[0].options.params.submission_id, 77);
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.equal(calls.length, 1);
+    state.draft.recipient = 'corrected@example.test';
+    const manual = pdf('manual.pdf');
+    state.addFiles([manual]);
+    const adding = state.addItinerary();
+    await state.addItinerary();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, '/orders/10/email/itinerary');
+    assert.deepEqual(JSON.parse(JSON.stringify(calls[1].data)), {
+        submission_id: 77,
+        source_version: itinerary().source.source_version,
+        approved: true,
+        intended_customer_email: 'customer@example.test',
+    });
+    respond(1, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await adding;
+    assert.equal(state.selectedDocuments.value.length, 1);
+    assert.equal(state.context.value.documents.length, 1);
+    assert.equal(state.files.value[0], manual);
+    const preparing = state.preparePreview();
+    assert.deepEqual(calls[2].data.getAll('document_ids[]'), [uuid]);
+    assert.equal(calls[2].data.getAll('files[]')[0].name, 'manual.pdf');
+    respond(2, {
+        preview: saved({
+            attachments: [
+                { name: 'Travel-Itinerary-301.pdf', size: 40 },
+                { name: 'manual.pdf', size: 20 },
+            ],
+        }),
+    });
+    await preparing;
+    assert.equal(state.preview.value.attachments.length, 2);
+    assert.equal(
+        calls.some((call) => call.url.endsWith('/send')),
+        false,
+    );
+});
+
+test('legacy source replacement clears only generated selection and preserves uploads and draft on refresh failure', async (t) => {
+    const { state, calls, respond, open } = harness(t, { submissionId: 77 });
+    await open(context({ itinerary_attachment: itinerary() }));
+    const adding = state.addItinerary();
+    respond(1, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await adding;
+    const manual = pdf();
+    state.addFiles([manual]);
+    state.draft.subject = 'Keep my draft';
+    const failed = state.loadContext();
+    calls[2].reject(new Error('Network unavailable'));
+    await failed;
+    assert.equal(state.selectedDocuments.value[0].id, uuid);
+    assert.equal(state.files.value[0], manual);
+    const refreshed = state.loadContext();
+    respond(
+        3,
+        context({
+            itinerary_attachment: itinerary('d'.repeat(64)),
+            documents: [itineraryDocument()],
+        }),
+    );
+    await refreshed;
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.equal(state.files.value[0], manual);
+    assert.equal(state.draft.subject, 'Keep my draft');
+    assert.match(state.attachmentNotice.value, /changed/);
+});
+
+test('legacy add respects combined limits and a reused stored document is selected only once', async (t) => {
+    const { state, calls, respond, open } = harness(t);
+    await open(
+        context({
+            itinerary_attachment: itinerary(),
+            limits: { max_files: 2, max_file_bytes: 60, max_total_bytes: 50 },
+        }),
+    );
+    const manual = pdf('manual.pdf', 20);
+    state.addFiles([manual]);
+    const adding = state.addItinerary();
+    respond(1, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await adding;
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.match(
+        state.attachmentNotice.value,
+        /saved but could not be selected/,
+    );
+    state.removeFile(0);
+    const retry = state.addItinerary();
+    respond(2, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await retry;
+    assert.equal(state.context.value.documents.length, 1);
+    assert.deepEqual([...state.selectedDocumentIds.value], [uuid]);
+    const preparing = state.preparePreview();
+    assert.equal(calls[3].data.getAll('files[]').length, 0);
+    assert.deepEqual(calls[3].data.getAll('document_ids[]'), [uuid]);
+    calls[3].reject(
+        validationFailure({ itinerary: ['The saved itinerary changed.'] }),
+    );
+    await preparing;
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.equal(state.step.value, 'compose');
+    assert.equal(state.context.value.itinerary_attachment.available, false);
+});
+
+test('legacy add completion cannot enter a closed or different-origin composer even when transport ignores abort', async (t) => {
+    const { state, props, calls, respond, open } = harness(t, {
+        submissionId: 77,
+    });
+    await open(context({ itinerary_attachment: itinerary() }));
+    const adding = state.addItinerary();
+    state.setOpen(false);
+    assert.equal(calls[1].options.signal.aborted, true);
+    respond(1, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await adding;
+    assert.equal(state.selectedDocuments.value.length, 0);
+    await open(context({ itinerary_attachment: itinerary() }));
+    const delayed = state.addItinerary();
+    const index = calls.length - 1;
+    props.submissionId = 88;
+    respond(index, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary(),
+    });
+    await delayed;
+    await flush();
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.equal(state.attachmentNotice.value, '');
+});
+
+test('legacy source revalidation after add cannot claim success for an obsolete saved PDF', async (t) => {
+    const { state, calls, respond, open } = harness(t);
+    await open(context({ itinerary_attachment: itinerary() }));
+    const adding = state.addItinerary();
+    respond(1, {
+        document: itineraryDocument(),
+        itinerary_attachment: itinerary('d'.repeat(64)),
+    });
+    await adding;
+    assert.equal(state.selectedDocuments.value.length, 0);
+    assert.match(state.error.value, /changed while/);
+    assert.equal(state.attachmentNotice.value, '');
+    assert.equal(calls.length, 2);
+});
 
 test('queue can open the latest saved email explicitly without sending and receives scoped settlement and close events', async (t) => {
     const { hooks, state, calls, respond, events } = harness(t);

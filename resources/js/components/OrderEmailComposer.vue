@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DocumentDeliveryComposer from '@/components/DocumentDeliveryComposer.vue';
+import GeneratedItineraryAttachment from '@/components/GeneratedItineraryAttachment.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -9,6 +10,11 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    attachmentLimitError,
+    currentItineraryDocument,
+    readAddedItinerary,
+} from '@/lib/itineraryAttachments';
 import type {
     EmailDelivery,
     EmailDeliveryStatus,
@@ -33,6 +39,7 @@ import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
 const props = defineProps<{
     orderId: number;
     orderNumber?: string | number;
+    submissionId?: number;
     hideTrigger?: boolean;
 }>();
 const emit = defineEmits<{
@@ -54,6 +61,9 @@ const draft = reactive({
     trackOpens: false,
 });
 const files = shallowRef<File[]>([]);
+const selectedDocumentIds = ref<string[]>([]);
+const addingItinerary = ref(false);
+const attachmentNotice = ref('');
 const fileInput = ref<HTMLInputElement | null>(null);
 const preview = shallowRef<EmailPreview | null>(null);
 const delivery = shallowRef<EmailDelivery | null>(null);
@@ -77,8 +87,14 @@ let disposed = false;
 let generation = 0;
 let request: AbortController | null = null;
 let sendRequest: AbortController | null = null;
+let activeSubmissionId = props.submissionId;
 const busy = computed(
-    () => loading.value || preparing.value || sending.value || checking.value,
+    () =>
+        loading.value ||
+        preparing.value ||
+        sending.value ||
+        checking.value ||
+        addingItinerary.value,
 );
 const limits = computed(
     () =>
@@ -88,8 +104,22 @@ const limits = computed(
             max_total_bytes: 10_485_760,
         },
 );
+const selectedDocuments = computed(() =>
+    (context.value?.documents ?? []).filter(
+        (file) =>
+            selectedDocumentIds.value.includes(file.id) &&
+            file.approved &&
+            currentItineraryDocument(file, context.value?.itinerary_attachment),
+    ),
+);
+const totalFiles = computed(() => [...selectedDocuments.value, ...files.value]);
 const totalBytes = computed(() =>
-    files.value.reduce((sum, file) => sum + file.size, 0),
+    totalFiles.value.reduce((sum, file) => sum + file.size, 0),
+);
+const itinerarySelected = computed(() =>
+    selectedDocuments.value.some(
+        (file) => file.source === 'submission_itinerary',
+    ),
 );
 const configured = computed(() =>
     Boolean(context.value?.connection.connected && context.value.sender?.email),
@@ -226,15 +256,21 @@ function readHistory(value: unknown): EmailHistory {
 }
 function invalidate() {
     generation++;
+    activeSubmissionId = props.submissionId;
     request?.abort();
     request = null;
     loading.value = false;
     preparing.value = false;
     checking.value = false;
+    addingItinerary.value = false;
 }
 function active(token: number, id: number) {
     return (
-        !disposed && open.value && generation === token && props.orderId === id
+        !disposed &&
+        open.value &&
+        generation === token &&
+        props.orderId === id &&
+        props.submissionId === activeSubmissionId
     );
 }
 function failure(exception: unknown, fallback: string): string {
@@ -271,6 +307,9 @@ async function loadContext() {
     error.value = '';
     try {
         const { data } = await axios.get(`/orders/${id}/email`, {
+            params: props.submissionId
+                ? { submission_id: props.submissionId }
+                : undefined,
             headers: { Accept: 'application/json' },
             signal: request.signal,
             timeout: 25_000,
@@ -298,7 +337,24 @@ async function loadContext() {
                 subject: data.subject,
                 body: data.body,
             });
-        context.value = { ...data, history };
+        context.value = {
+            ...data,
+            history,
+            documents: Array.isArray(data.documents) ? data.documents : [],
+        };
+        const previousCount = selectedDocumentIds.value.length;
+        selectedDocumentIds.value = selectedDocuments.value.map(
+            (file) => file.id,
+        );
+        if (previousCount !== selectedDocumentIds.value.length) {
+            attachmentNotice.value =
+                'The generated PDF changed or is no longer available. Add the current itinerary again before reviewing this email.';
+            if (['prepared', 'failed'].includes(currentStatus.value ?? '')) {
+                preview.value = null;
+                delivery.value = null;
+                step.value = 'compose';
+            }
+        }
     } catch (exception) {
         if (active(token, id))
             error.value = failure(
@@ -340,7 +396,7 @@ function addFiles(incoming: File[]) {
     error.value = '';
     const next = [...files.value, ...incoming];
     let message = '';
-    if (next.length > limits.value.max_files)
+    if (next.length + selectedDocuments.value.length > limits.value.max_files)
         message = `Attach up to ${limits.value.max_files} PDF files.`;
     else if (
         incoming.some((file) => !/\.pdf$/i.test(file.name) || file.size === 0)
@@ -350,8 +406,10 @@ function addFiles(incoming: File[]) {
     else if (next.some((file) => file.size > limits.value.max_file_bytes))
         message = `Each PDF must be ${formatBytes(limits.value.max_file_bytes)} or smaller.`;
     else if (
-        next.reduce((sum, file) => sum + file.size, 0) >
-        limits.value.max_total_bytes
+        [...selectedDocuments.value, ...next].reduce(
+            (sum, file) => sum + file.size,
+            0,
+        ) > limits.value.max_total_bytes
     )
         message = `All PDFs together must be ${formatBytes(limits.value.max_total_bytes)} or smaller.`;
     errors.value = { ...errors.value, files: message };
@@ -371,6 +429,119 @@ function removeFile(index: number) {
     files.value = files.value.filter((_, item) => item !== index);
     errors.value = {};
 }
+function removeStoredDocument(id: string) {
+    if (busy.value) return;
+    selectedDocumentIds.value = selectedDocumentIds.value.filter(
+        (value) => value !== id,
+    );
+    errors.value = {};
+    attachmentNotice.value = '';
+}
+function invalidateItinerary() {
+    selectedDocumentIds.value = [];
+    if (context.value)
+        context.value = {
+            ...context.value,
+            itinerary_attachment: {
+                available: false,
+                source: null,
+                reason: 'The itinerary changed or is unavailable. Refresh to load its current version.',
+            },
+        };
+}
+async function addItinerary() {
+    const source = context.value?.itinerary_attachment?.source;
+    if (
+        busy.value ||
+        disposed ||
+        !open.value ||
+        itinerarySelected.value ||
+        !context.value?.itinerary_attachment?.available ||
+        !source
+    )
+        return;
+    if (totalFiles.value.length >= limits.value.max_files) {
+        errors.value = {
+            files: `Select up to ${limits.value.max_files} PDFs for this email. Remove a PDF before adding the itinerary.`,
+        };
+        return;
+    }
+    invalidate();
+    const token = generation,
+        id = props.orderId;
+    request = new AbortController();
+    addingItinerary.value = true;
+    error.value = '';
+    errors.value = {};
+    attachmentNotice.value = '';
+    try {
+        const { data } = await axios.post(
+            `/orders/${id}/email/itinerary`,
+            {
+                submission_id: source.submission_id,
+                source_version: source.source_version,
+                approved: true,
+                intended_customer_email: context.value.recipient,
+            },
+            {
+                headers: { Accept: 'application/json' },
+                signal: request.signal,
+                timeout: 30_000,
+            },
+        );
+        const document = readAddedItinerary(data.document, source);
+        if (!active(token, id)) return;
+        context.value = {
+            ...context.value!,
+            itinerary_attachment: data.itinerary_attachment,
+            documents: [
+                ...(context.value?.documents ?? []).filter(
+                    (file) => file.id !== document.id,
+                ),
+                document,
+            ],
+        };
+        selectedDocumentIds.value = selectedDocuments.value.map(
+            (file) => file.id,
+        );
+        if (
+            !currentItineraryDocument(
+                document,
+                context.value.itinerary_attachment,
+            )
+        ) {
+            error.value =
+                'The itinerary changed while it was being added. Refresh and review the current PDF before adding it again.';
+            return;
+        }
+        const problem = attachmentLimitError(
+            [...totalFiles.value, document],
+            limits.value,
+        );
+        if (problem) {
+            errors.value = { files: problem };
+            attachmentNotice.value =
+                'The itinerary was saved but could not be selected. Remove another PDF, then add it again.';
+            return;
+        }
+        selectedDocumentIds.value = [
+            ...new Set([...selectedDocumentIds.value, document.id]),
+        ];
+        attachmentNotice.value =
+            'Itinerary added and selected for review. No email has been sent.';
+    } catch (exception) {
+        if (active(token, id)) {
+            errors.value = validationErrors(exception);
+            if (errors.value.itinerary) invalidateItinerary();
+            error.value = failure(
+                exception,
+                'The itinerary could not be added. Your message and uploaded PDFs are unchanged.',
+            );
+        }
+    } finally {
+        if (active(token, id)) addingItinerary.value = false;
+    }
+}
 async function preparePreview() {
     if (busy.value || !configured.value || disposed) return;
     if (sendUnconfirmed.value) {
@@ -388,9 +559,13 @@ async function preparePreview() {
         next.subject = 'Enter a subject of up to 255 characters.';
     if (!draft.body.trim() || draft.body.length > 20_000)
         next.body = 'Enter a message of up to 20,000 characters.';
-    if (!files.value.length)
-        next.files =
-            'Attach at least one PDF downloaded from your booking system.';
+    if (!totalFiles.value.length)
+        next.files = 'Add the generated itinerary or upload at least one PDF.';
+    const attachmentProblem = attachmentLimitError(
+        totalFiles.value,
+        limits.value,
+    );
+    if (attachmentProblem) next.files = attachmentProblem;
     errors.value = next;
     error.value = '';
     if (Object.keys(next).length) return;
@@ -405,6 +580,9 @@ async function preparePreview() {
     form.append('body', draft.body);
     form.append('track_opens', draft.trackOpens ? '1' : '0');
     files.value.forEach((file) => form.append('files[]', file, file.name));
+    selectedDocuments.value.forEach((file) =>
+        form.append('document_ids[]', file.id),
+    );
     try {
         const { data } = await axios.post(`/orders/${id}/email/preview`, form, {
             headers: { Accept: 'application/json' },
@@ -420,6 +598,7 @@ async function preparePreview() {
     } catch (exception) {
         if (active(token, id)) {
             errors.value = validationErrors(exception);
+            if (errors.value.itinerary) invalidateItinerary();
             error.value = failure(
                 exception,
                 'The email preview could not be prepared. Your message and selected PDFs are still here.',
@@ -511,6 +690,18 @@ async function sendEmail() {
         sendUnconfirmed.value = false;
     } catch (exception) {
         if (active(token, orderId)) {
+            const fields = validationErrors(exception);
+            if (fields.itinerary) {
+                invalidateItinerary();
+                sendUnconfirmed.value = false;
+                errors.value = fields;
+                preview.value = null;
+                delivery.value = null;
+                step.value = 'compose';
+                error.value =
+                    'The itinerary changed. Refresh and review its current PDF before sending.';
+                return;
+            }
             sendUnconfirmed.value = true;
             error.value = failure(
                 exception,
@@ -534,7 +725,7 @@ function formatTime(value: string) {
     return Number.isFinite(date.getTime()) ? date.toLocaleString() : '—';
 }
 watch(
-    () => props.orderId,
+    () => [props.orderId, props.submissionId],
     () => {
         invalidate();
         sendRequest?.abort();
@@ -544,6 +735,8 @@ watch(
         preview.value = null;
         delivery.value = null;
         files.value = [];
+        selectedDocumentIds.value = [];
+        attachmentNotice.value = '';
         Object.assign(draft, {
             recipient: '',
             subject: '',
@@ -574,6 +767,7 @@ defineExpose({
                 Boolean(
                     preview.value ||
                     files.value.length ||
+                    selectedDocumentIds.value.length ||
                     draft.trackOpens ||
                     (context.value &&
                         (draft.recipient !== context.value.recipient ||
@@ -625,7 +819,7 @@ defineExpose({
                     context?.workflow?.enabled
                         ? 'Review approved PDFs, your website’s branding, and the order action before sending.'
                         : step === 'compose'
-                          ? 'Attach the PDFs from your booking system, then review the complete email.'
+                          ? 'Add a generated itinerary or upload PDFs, then review the complete email.'
                           : 'Review the saved sender, recipient, message, and attachments before sending.'
                 }}</DialogDescription>
             </DialogHeader>
@@ -655,9 +849,13 @@ defineExpose({
             </div>
             <DocumentDeliveryComposer
                 v-if="context?.workflow?.enabled"
-                :key="orderId"
+                :key="`${orderId}-${submissionId ?? 'order'}`"
                 ref="workflowComposer"
                 :order-id="orderId"
+                :order-number="orderNumber"
+                :submission-id="submissionId"
+                :active="open"
+                :itinerary-attachment="context.itinerary_attachment"
                 :recipient="context.recipient"
                 :workflow="context.workflow"
                 :limits="context.limits"
@@ -811,6 +1009,25 @@ defineExpose({
                         class="space-y-3"
                         aria-labelledby="email-attachments-title"
                     >
+                        <GeneratedItineraryAttachment
+                            v-if="context.itinerary_attachment || submissionId"
+                            :attachment="context.itinerary_attachment"
+                            :submission-id="submissionId"
+                            :order-number="orderNumber ?? orderId"
+                            :recipient="context.recipient"
+                            :busy="busy"
+                            :adding="addingItinerary"
+                            :selected="itinerarySelected"
+                            @add="addItinerary"
+                            @refresh="loadContext"
+                        />
+                        <p
+                            v-if="attachmentNotice"
+                            role="status"
+                            class="text-xs text-muted-foreground"
+                        >
+                            {{ attachmentNotice }}
+                        </p>
                         <div
                             class="flex flex-wrap items-baseline justify-between gap-2"
                         >
@@ -821,15 +1038,54 @@ defineExpose({
                                 PDF attachments
                             </h3>
                             <span class="text-xs text-muted-foreground"
-                                >{{ files.length }} /
+                                >{{ totalFiles.length }} /
                                 {{ limits.max_files }} files ·
                                 {{
-                                    files.length
+                                    totalFiles.length
                                         ? formatBytes(totalBytes)
                                         : '0 KB'
                                 }}</span
                             >
                         </div>
+                        <ul
+                            v-if="selectedDocuments.length"
+                            class="divide-y rounded-lg border"
+                        >
+                            <li
+                                v-for="file in selectedDocuments"
+                                :key="file.id"
+                                class="flex min-w-0 items-center gap-3 px-3 py-2.5"
+                            >
+                                <FileText
+                                    class="size-4 shrink-0 text-muted-foreground"
+                                />
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-sm break-words">
+                                        {{ file.name }}
+                                    </p>
+                                    <p class="text-xs text-muted-foreground">
+                                        {{ formatBytes(file.size) }} · Generated
+                                        PDF · Selected for review
+                                    </p>
+                                </div>
+                                <a
+                                    :href="`/orders/${orderId}/document-deliveries/documents/${encodeURIComponent(file.id)}`"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="shrink-0 text-xs underline underline-offset-4"
+                                    >Download</a
+                                >
+                                <button
+                                    type="button"
+                                    :disabled="busy"
+                                    :aria-label="`Remove ${file.name}`"
+                                    class="rounded p-1 text-muted-foreground hover:bg-muted"
+                                    @click="removeStoredDocument(file.id)"
+                                >
+                                    <X class="size-4" />
+                                </button>
+                            </li>
+                        </ul>
                         <div
                             class="rounded-lg border border-dashed p-4 text-center"
                             :class="

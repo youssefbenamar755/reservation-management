@@ -28,6 +28,8 @@
     $flightIconDataUris = $flightIconDataUris ?? [];
     $isExternal = ($document['reference_type'] ?? 'internal') === 'external' && $present($document['external_pnr'] ?? null);
     $reference = $text($document['reference'] ?? null);
+    $documentTitle = $isExternal ? 'Booked Itinerary' : 'Travel Itinerary';
+    $displayReference = $isExternal ? 'PNR-'.$document['external_pnr'] : 'Itinerary reference: '.$reference;
     $generatedAt = $text($document['generated_at'] ?? null);
     if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/D', $generatedAt)) {
         try {
@@ -41,7 +43,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Travel Itinerary - {{ $reference }}</title>
+    <title>{{ $documentTitle }} - {{ $reference }}</title>
     <style>
         @page { size: A4 portrait; margin: 43pt 40pt 42pt; }
         @page :first { margin-top: 21pt; }
@@ -101,16 +103,13 @@
     </style>
 </head>
 <body>
-    <div class="page-footer"><div class="footer-reference">Itinerary reference: {{ $reference }}</div></div>
-    <h1>Travel Itinerary</h1>
+    <div class="page-footer"><div class="footer-reference">{{ $displayReference }}</div></div>
+    <h1>{{ $documentTitle }}</h1>
 
     <div class="document">
         <div class="reference-strip">
-            <div class="reference-heading">Travel Itinerary</div>
-            <div class="reference-line">
-                {{ $isExternal ? 'Booking PNR (provided by operator)' : 'Itinerary reference' }}:
-                {{ $isExternal ? $document['external_pnr'] : $reference }}
-            </div>
+            <div class="reference-heading">{{ $documentTitle }}</div>
+            <div class="reference-line">{{ $displayReference }}</div>
             <div class="reference-status">
                 @if ($isExternal)
                     Booking PNR supplied by the operator. Reservation status is not verified by this document.
@@ -130,6 +129,9 @@
                     <div class="agency-heading">Consultant</div>
                     @if ($present($agency['consultant_name'] ?? null))
                         <div class="agency-heading">{{ $agency['consultant_name'] }}</div>
+                        @if ($present($agency['address'] ?? null))
+                            <div class="agency-copy">{{ $agency['address'] }}</div>
+                        @endif
                     @endif
                 </td>
                 <td class="agency-details">

@@ -1,4 +1,8 @@
-import type { DocumentWorkflowContext } from '@/types/document-delivery';
+import type {
+    ApprovedOrderDocument,
+    DocumentWorkflowContext,
+    ItineraryAttachmentContext,
+} from '@/types/document-delivery';
 
 export type EmailDeliveryStatus =
     | 'prepared'
@@ -48,6 +52,8 @@ export interface EmailHistory extends EmailDelivery {
 }
 export interface OrderEmailContext {
     workflow?: DocumentWorkflowContext;
+    itinerary_attachment?: ItineraryAttachmentContext;
+    documents?: ApprovedOrderDocument[];
     connection: { connected: boolean; email: string | null };
     settings_url: string;
     sender: EmailSender | null;

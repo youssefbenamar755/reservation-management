@@ -34,6 +34,7 @@ class OrderEmailDeliveryService
 
                 return [$current, false];
             }
+            app(GeneratedItineraryAttachment::class)->assertSnapshot($order->fresh(), $actor, $current->snapshot);
             $current->update(['status' => 'sending', 'sending_at' => now(), 'send_attempts' => $current->send_attempts + 1, 'result_message' => 'Gmail is processing this send request.']);
             app(ActionHistoryRecorder::class)->beginEmail($current, $order);
 
@@ -62,7 +63,13 @@ class OrderEmailDeliveryService
                 throw new GmailDeliveryException('The Gmail connection has changed. Prepare a new preview before sending.');
             }
             $sendStarted = true;
-            $messageId = $this->gmail->send($connection, $current->mime);
+            $messageId = $this->gmail->send($connection, $current->mime, function () use ($order, $actor, $current) {
+                try {
+                    app(GeneratedItineraryAttachment::class)->assertSnapshot($order->fresh(), $actor, $current->snapshot);
+                } catch (Throwable) {
+                    throw new GmailDeliveryException('The itinerary, customer or approved documents changed. Prepare a new preview before sending.');
+                }
+            });
             if ($messageId === '') {
                 throw new GmailDeliveryException(self::UNKNOWN, true);
             }

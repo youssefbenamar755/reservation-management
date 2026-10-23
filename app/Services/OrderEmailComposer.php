@@ -47,11 +47,15 @@ class OrderEmailComposer
     /** @param array<UploadedFile> $files */
     public function prepare(WcOrder $order, User $actor, array $values, array $files): OrderEmailDelivery
     {
+        $documents = app(GeneratedItineraryAttachment::class)->selectedDocuments($order, $actor, $values['document_ids'] ?? []);
         // Check aggregate size before loading attachment bytes into memory.
-        if (count($files) < 1 || count($files) > self::LIMITS['max_files']) {
+        if (count($files) + $documents->count() < 1 || count($files) + $documents->count() > self::LIMITS['max_files']) {
             throw ValidationException::withMessages(['files' => 'Choose between one and five PDF files.']);
         }
-        $total = 0;
+        $total = (int) $documents->sum('size');
+        if ($documents->contains(fn ($document) => $document->size < 1 || $document->size > self::LIMITS['max_file_bytes'])) {
+            throw ValidationException::withMessages(['document_ids' => 'Each approved PDF must be no larger than 5 MiB.']);
+        }
         foreach ($files as $file) {
             if (! $file instanceof UploadedFile || ! $file->isValid() || $file->getSize() < 1 || $file->getSize() > self::LIMITS['max_file_bytes']) {
                 throw ValidationException::withMessages(['files' => 'Each PDF must be no larger than 5 MiB.']);
@@ -93,6 +97,12 @@ class OrderEmailComposer
             $attachments[] = ['name' => $name, 'size' => strlen($bytes), 'sha256' => hash('sha256', $bytes)];
             $contents[] = $bytes;
         }
+        // Alias refresh may have taken time. Revalidate the source and immutable bytes.
+        $documents = app(GeneratedItineraryAttachment::class)->selectedDocuments($order->fresh(), $actor, $documents->modelKeys());
+        foreach ($documents as $document) {
+            $attachments[] = $document->summary();
+            $contents[] = app(OrderDocumentStorage::class)->bytes($document);
+        }
         $snapshot = ['recipient' => $values['recipient'], 'sender' => $sender, 'subject' => $values['subject'], 'body' => $values['body'], 'attachments' => $attachments];
         // Keep the existing fingerprint for untracked messages, including older previews.
         if ((bool) ($values['track_opens'] ?? false)) {
@@ -107,6 +117,7 @@ class OrderEmailComposer
             if ($currentOrder->website_id !== $order->website_id) {
                 throw ValidationException::withMessages(['order' => 'The order website changed. Reload the order before preparing an email.']);
             }
+            app(GeneratedItineraryAttachment::class)->assertSnapshot($currentOrder, $actor, $snapshot);
             $existing = OrderEmailDelivery::where('deduplication_key', $fingerprint)->lockForUpdate()->first();
             if ($existing) {
                 $this->expire($existing);

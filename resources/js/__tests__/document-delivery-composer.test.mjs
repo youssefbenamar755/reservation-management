@@ -9,6 +9,22 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const vue = require('vue');
+const itineraryModule = { exports: {} };
+runInNewContext(
+    ts.transpileModule(
+        readFileSync(
+            new URL('../lib/itineraryAttachments.ts', import.meta.url),
+            'utf8',
+        ),
+        {
+            compilerOptions: {
+                module: ts.ModuleKind.CommonJS,
+                target: ts.ScriptTarget.ES2022,
+            },
+        },
+    ).outputText,
+    { module: itineraryModule, exports: itineraryModule.exports },
+);
 const source = readFileSync(
     new URL('../components/DocumentDeliveryComposer.vue', import.meta.url),
     'utf8',
@@ -33,6 +49,31 @@ const document = (overrides = {}) => ({
     approved: true,
     ...overrides,
 });
+const itinerary = (version = 'b'.repeat(64)) => ({
+    available: true,
+    reason: null,
+    source: {
+        submission_id: 77,
+        submission_number: 301,
+        reference: 'ITN-301',
+        reference_type: 'internal',
+        external_pnr: null,
+        generated_at: '2026-10-23T12:00:00Z',
+        source_version: version,
+        name: 'Travel-Itinerary-301.pdf',
+        download_url: '/submissions/entries/77/itinerary',
+    },
+});
+const generated = (overrides = {}) =>
+    document({
+        id: '33345678-1234-1234-1234-123456789abc',
+        source: 'submission_itinerary',
+        submission_id: 77,
+        source_version: itinerary().source.source_version,
+        download_url:
+            '/orders/10/document-deliveries/documents/33345678-1234-1234-1234-123456789abc',
+        ...overrides,
+    });
 const workflow = (overrides = {}) => ({
     enabled: true,
     language: 'en',
@@ -82,7 +123,7 @@ const flush = async () => {
     await new Promise((resolve) => setImmediate(resolve));
 };
 
-function harness(t, context = workflow()) {
+function harness(t, context = workflow(), initialProps = {}) {
     const calls = [];
     const hooks = {};
     const events = [];
@@ -95,6 +136,7 @@ function harness(t, context = workflow()) {
             max_file_bytes: 5242880,
             max_total_bytes: 10485760,
         },
+        ...initialProps,
     });
     const request = (method, url, data, options) =>
         new Promise((resolve, reject) =>
@@ -115,6 +157,8 @@ function harness(t, context = workflow()) {
         FormData,
         URL,
         require: (name) => {
+            if (name === '@/lib/itineraryAttachments')
+                return itineraryModule.exports;
             if (name === 'axios') return { default: axios };
             if (name === 'vue')
                 return {
@@ -123,7 +167,10 @@ function harness(t, context = workflow()) {
                         hooks.unmount = fn;
                     },
                 };
-            if (name === '@/components/DocumentEmailPreview.vue')
+            if (
+                name === '@/components/DocumentEmailPreview.vue' ||
+                name === '@/components/GeneratedItineraryAttachment.vue'
+            )
                 return { default: wrapper };
             if (name.startsWith('@/components/ui/'))
                 return new Proxy({}, { get: () => wrapper });
@@ -171,6 +218,157 @@ function harness(t, context = workflow()) {
         prepare,
     };
 }
+
+test('branded add explicitly approves the source, retains pending uploads and selects one exact stored snapshot', async (t) => {
+    const { state, calls, respond } = harness(t, workflow(), {
+        submissionId: 77,
+        itineraryAttachment: itinerary(),
+        active: true,
+    });
+    assert.equal(calls.length, 0);
+    assert.equal(state.selected.value.length, 0);
+    state.recipient.value = 'corrected@example.test';
+    const manual = new File(['%PDF'], 'manual.pdf', {
+        type: 'application/pdf',
+    });
+    state.pendingFiles.value = [manual];
+    const adding = state.addItinerary();
+    await state.addItinerary();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls[0].data)), {
+        submission_id: 77,
+        source_version: itinerary().source.source_version,
+        approved: true,
+        intended_customer_email: 'customer@example.test',
+    });
+    respond(0, { document: generated(), itinerary_attachment: itinerary() });
+    await adding;
+    assert.deepEqual([...state.selected.value], [generated().id]);
+    assert.equal(state.pendingFiles.value[0], manual);
+    assert.equal(state.blocked.value, true);
+    assert.match(state.attachmentNotice.value, /No email has been sent/);
+    state.pendingFiles.value = [];
+    state.recipient.value = 'customer@example.test';
+    state.covered.value = [...state.context.value.required_services];
+    state.fulfillmentConfirmed.value = true;
+    const preparing = state.prepare();
+    assert.deepEqual([...calls[1].data.document_ids], [generated().id]);
+    respond(1, {
+        preview: preview({ attachments: [generated()] }),
+        delivery: outcome(),
+    });
+    await preparing;
+    assert.equal(state.preview.value.attachments[0].id, generated().id);
+    assert.equal(
+        calls.some((call) => call.url.endsWith('/send')),
+        false,
+    );
+});
+
+test('branded context refresh fails without losing selections, then removes only a replaced itinerary', async (t) => {
+    const { state, calls, respond } = harness(
+        t,
+        workflow({ documents: [document(), generated()] }),
+        { submissionId: 77, itineraryAttachment: itinerary() },
+    );
+    state.selected.value = [fileId, generated().id];
+    state.preview.value = preview({ attachments: [document(), generated()] });
+    state.showPreview.value = true;
+    const failed = state.reloadItinerary();
+    calls[0].reject(new Error('Offline'));
+    await failed;
+    assert.deepEqual([...state.selected.value], [fileId, generated().id]);
+    const reload = state.reloadItinerary();
+    assert.equal(calls[1].options.params.submission_id, 77);
+    respond(1, {
+        workflow: workflow({ documents: [document(), generated()] }),
+        itinerary_attachment: itinerary('d'.repeat(64)),
+    });
+    await reload;
+    assert.deepEqual([...state.selected.value], [fileId]);
+    assert.equal(state.preview.value, null);
+    assert.equal(state.showPreview.value, false);
+});
+
+test('branded closing or switching origin invalidates add completions and resets operator-review state', async (t) => {
+    const { state, props, calls, respond } = harness(t, workflow(), {
+        active: true,
+        submissionId: 77,
+        itineraryAttachment: itinerary(),
+    });
+    const adding = state.addItinerary();
+    props.active = false;
+    assert.equal(calls[0].options.signal.aborted, true);
+    respond(0, { document: generated(), itinerary_attachment: itinerary() });
+    await adding;
+    assert.equal(state.selected.value.length, 0);
+    props.active = true;
+    const delayed = state.addItinerary();
+    state.reviewReason.value = 'Old customer review';
+    state.reviewConfirmed.value = true;
+    props.submissionId = 88;
+    respond(1, { document: generated(), itinerary_attachment: itinerary() });
+    await delayed;
+    assert.equal(state.selected.value.length, 0);
+    assert.equal(state.reviewReason.value, '');
+    assert.equal(state.reviewConfirmed.value, false);
+    assert.equal(state.attachmentNotice.value, '');
+});
+
+test('branded stale-after-save metadata and combined-size overflow cannot select or claim success', async (t) => {
+    const { state, respond } = harness(t, workflow(), {
+        itineraryAttachment: itinerary(),
+        limits: { max_files: 2, max_file_bytes: 60, max_total_bytes: 70 },
+    });
+    state.selected.value = [fileId];
+    const adding = state.addItinerary();
+    respond(0, { document: generated(), itinerary_attachment: itinerary() });
+    await adding;
+    assert.deepEqual([...state.selected.value], [fileId]);
+    assert.match(
+        state.attachmentNotice.value,
+        /saved but could not be selected/,
+    );
+    state.selected.value = [];
+    const retry = state.addItinerary();
+    respond(1, {
+        document: generated(),
+        itinerary_attachment: itinerary('d'.repeat(64)),
+    });
+    await retry;
+    assert.equal(state.selected.value.length, 0);
+    assert.match(state.error.value, /changed while/);
+    assert.equal(state.attachmentNotice.value, '');
+    assert.equal(
+        state.context.value.documents.filter(
+            (item) => item.id === generated().id,
+        ).length,
+        1,
+    );
+});
+
+test('branded stale-itinerary preview rejection keeps manual selections and no automatic send or retry', async (t) => {
+    const { state, calls, fullyConfirm } = harness(
+        t,
+        workflow({ documents: [document(), generated()] }),
+        { itineraryAttachment: itinerary() },
+    );
+    fullyConfirm();
+    state.selected.value.push(generated().id);
+    const preparing = state.prepare();
+    calls[0].reject({
+        isAxiosError: true,
+        response: {
+            status: 422,
+            data: { errors: { itinerary: ['The itinerary changed.'] } },
+        },
+    });
+    await preparing;
+    assert.deepEqual([...state.selected.value], [fileId]);
+    assert.equal(state.itineraryAttachment.value.available, false);
+    assert.equal(state.preview.value, null);
+    assert.equal(calls.length, 1);
+});
 
 test('historical PDFs require explicit selection, recorded language wins, and full completion requires every explicit confirmation', async (t) => {
     const context = workflow({
@@ -323,6 +521,28 @@ test('send is bound to the reviewed immutable attempt; double click and uncertai
     await refresh;
     assert.equal(state.canSend.value, false);
     assert.match(state.stateMessage.value, /review required/);
+});
+
+test('upload context failure preserves original local files and an already selected generated PDF', async (t) => {
+    const { state, calls, respond } = harness(
+        t,
+        workflow({ documents: [generated()] }),
+        { itineraryAttachment: itinerary() },
+    );
+    state.selected.value = [generated().id];
+    const manual = new File(['%PDF-sample'], 'hotel.pdf', {
+        type: 'application/pdf',
+    });
+    state.pendingFiles.value = [manual];
+    state.approvedUpload.value = true;
+    const uploading = state.upload();
+    respond(0, { documents: [document()] });
+    await flush();
+    calls[1].reject(new Error('Refresh failed'));
+    await uploading;
+    assert.equal(state.pendingFiles.value[0], manual);
+    assert.deepEqual([...state.selected.value], [generated().id]);
+    assert.equal(calls.length, 2);
 });
 
 test('sent email with pending order update retries only sync and exposes saved status and Gmail link', async (t) => {
