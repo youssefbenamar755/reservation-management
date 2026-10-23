@@ -133,8 +133,10 @@ Open [Submissions](/submissions) to browse Fluent Forms data by website and form
 4. If labels are missing or a form changed, use its **Sync schema** action and reload the entry.
 5. Review the linked WooCommerce order section. When an order is linked and you have permission, you can change its status or choose **Email documents** from here.
 6. If there is no linked order, use **View website orders** and locate it by customer or order information. WP Hub does not offer document sending from an unrelated entry without an order context.
-7. Where flight details and the required integration are available, the entry offers PNR generation, ticket-code generation, copy actions, and PDF downloads. Review the result before using it; availability depends on the configured booking integration and complete input.
-8. Use raw data only when troubleshooting field mapping. It may contain customer information.
+7. Open **Itinerary & documents → Itinerary document** to make a PDF from the saved passenger and flight details. Choose **Internal itinerary reference** to generate a WP Hub reference, or **Use an existing booking PNR** to enter a real PNR and the booking system that supplied it. An internal reference does not confirm an airline reservation; an entered PNR is operator-provided and is not independently verified by WP Hub.
+8. Click **Generate itinerary**, then **Download PDF**. The first template includes the website identity, each flight segment and all submitted passengers. Missing facts are marked as not provided; WP Hub does not invent baggage, terminals, flight numbers or bookings. Review the document before sharing it.
+9. Use **Update itinerary** after a submission or reference change. This refreshes the saved document details while keeping the internal reference. Downloads use that saved snapshot and require dashboard access. Downloading does not send email or change order/payment status. To email it, review the PDF and upload it through the existing **Email documents** workflow. The old Amadeus generation and dummy-code actions are retired.
+10. Use raw data only when troubleshooting field mapping. It may contain customer information.
 
 Deleting an entry or all entries of a form removes stored WP Hub submission records. Read the confirmation carefully; deletion is not a way to cancel a WooCommerce order or a booking with an external provider.
 

@@ -17,6 +17,14 @@ const ui = {
   '@/components/ui/card': Object.fromEntries(['Card', 'CardContent', 'CardDescription', 'CardHeader', 'CardTitle'].map((name) => [name, wrap('section')])),
   '@/components/ui/button': { Button: wrap('button') },
   '@/components/ui/badge': { Badge: wrap('span') },
+  '@/components/submissions/ItineraryDocumentCard.vue': { default: vue.defineComponent({
+    props: ['entryId', 'itinerary', 'canGenerate'],
+    setup: (props) => () => vue.h('section', {
+      'data-itinerary-entry': props.entryId,
+      'data-itinerary-can-generate': props.canGenerate,
+      'data-itinerary-reference': props.itinerary?.reference,
+    }, 'Itinerary document'),
+  }) },
   '@/components/OrderEmailComposer.vue': { default: vue.defineComponent({
     props: ['orderId', 'orderNumber'],
     setup: (props) => () => vue.h('button', {
@@ -172,30 +180,25 @@ test('JSON responses and entry email fallback retain their data', (t) => {
   assert.equal(text.state.additionalFields.value[0].value, 'Unstructured original response')
 })
 
-test('PNR and Amadeus actions retain flight/existing-PNR guards and use the local entry ID', (t) => {
+test('itinerary replaces legacy airline generation and passes only this submission context', async (t) => {
   const page = harness(t)
-  page.state.generatePnr()
-  page.state.generateAmadeusCode()
+  assert.equal(page.state.generatePnr, undefined)
+  assert.equal(page.state.generateAmadeusCode, undefined)
+  const initialHtml = await page.render()
+  assert.match(initialHtml, /Itinerary not generated/)
+  assert.match(initialHtml, /data-itinerary-entry="42" data-itinerary-can-generate="false"/)
+  page.props.itinerary = { reference: 'WPH-EXAMPLE', reference_type: 'internal', can_update: true }
+  page.props.itineraryCanGenerate = true
+  const html = await page.render()
+  assert.match(html, /Itinerary ready/)
+  assert.match(html, /data-itinerary-entry="42" data-itinerary-can-generate="true" data-itinerary-reference="WPH-EXAMPLE"/)
+  assert.ok(!html.includes('Generate PNR'))
+  assert.ok(!html.includes('Dummy ticket code'))
+  assert.ok(!html.includes('/storage/'))
   assert.equal(page.calls.posts.length, 0)
-  page.props.entry.payload.response = { flight_from: 'CMN', flight_to: 'CDG' }
-  page.props.entry.pnr = 'ABC123'
-  page.state.generatePnr()
-  assert.equal(page.calls.posts.length, 0)
-  page.props.entry.pnr = null
-  page.state.generatePnr()
-  assert.equal(page.calls.posts[0].url, '/submissions/entries/42/generate-pnr')
-  assert.equal(page.state.isGeneratingPnr.value, true)
-  page.calls.posts[0].options.onError({ message: 'Synthetic failure' })
-  assert.equal(page.state.isGeneratingPnr.value, false)
-  page.props.entry.amadeus_command_block = 'Existing code'
-  page.state.generateAmadeusCode()
-  assert.equal(page.calls.posts[1].url, '/submissions/entries/42/generate-amadeus-code')
-  page.calls.posts[1].options.onSuccess()
-  assert.equal(page.state.isGeneratingAmadeusCode.value, false)
-  assert.deepEqual(Array.from(page.calls.reloads[0].only), ['entry'])
 })
 
-test('delete still requires confirmation and returns to the correct form; PDFs use the local ID', (t) => {
+test('delete still requires confirmation and returns to the correct form', (t) => {
   const page = harness(t)
   page.state.deleteEntry()
   assert.equal(page.calls.deletes.length, 0)
@@ -207,11 +210,26 @@ test('delete still requires confirmation and returns to the correct form; PDFs u
   assert.equal(page.state.isDeleting.value, false)
   page.calls.deletes[0].options.onSuccess()
   assert.deepEqual(page.calls.visits, ['/submissions/forms/13/4'])
-  page.state.downloadPdf()
-  assert.equal(page.window.location.href, '')
-  page.props.entry.pnr_pdf_path = 'fixture.pdf'
-  page.state.downloadPdf()
-  assert.equal(page.window.location.href, '/submissions/entries/42/download-pdf')
+})
+
+test('previous PNR and PDF remain read-only and use the authenticated submission download', async (t) => {
+  const page = harness(t, {}, { pnr: 'OLD123', pnr_pdf_path: 'dummy-tickets/old-customer.pdf' })
+  const html = await page.render()
+  assert.match(html, /Previous booking record/)
+  assert.match(html, /Previous PNR \(historical\)/)
+  assert.match(html, /OLD123/)
+  assert.match(html, /href="\/submissions\/entries\/42\/download-pdf"/)
+  assert.match(html, /Itinerary not generated/)
+  assert.ok(!html.includes('/storage/'))
+  assert.ok(!html.includes('old-customer.pdf'))
+  assert.ok(!html.includes('Generate PNR'))
+  assert.equal(page.calls.posts.length, 0)
+  page.props.entry.pnr_pdf_path = null
+  const pnrOnlyHtml = await page.render()
+  assert.match(pnrOnlyHtml, /Previous booking record/)
+  assert.ok(!pnrOnlyHtml.includes('Download previous PDF'))
+  page.props.entry.pnr = null
+  assert.ok(!(await page.render()).includes('Previous booking record'))
 })
 
 test('copy preserves complete structured values and reports the copied field', async (t) => {
@@ -224,16 +242,15 @@ test('copy preserves complete structured values and reports the copied field', a
   assert.deepEqual(page.calls.successes, ['Copied to clipboard'])
 })
 
-test('structured values render zero, false, and nested answers and the page renders one ticket-code tool', async (t) => {
+test('structured values render zero, false, and nested answers beside one itinerary tool', async (t) => {
   const page = harness(t, { names: 'Plain Name', amount: 0, confirmed: false, custom: { nested: ['Saved value'] }, flight_from: 'CMN', flight_to: 'CDG' }, { amadeus_command_block: 'NM1EXAMPLE/ADA' })
   const html = await page.render()
-  assert.equal((html.match(/id="ticket-code-heading"/g) || []).length, 1)
-  assert.equal((html.match(/>Regenerate code<\/button>/g) || []).length, 1)
+  assert.equal((html.match(/data-itinerary-entry="42"/g) || []).length, 1)
   assert.ok(html.includes('Plain Name'))
   assert.ok(html.includes('Saved value'))
   assert.match(html, />0<\/span>/)
   assert.match(html, />No<\/span>/)
-  assert.ok(html.includes('Copy all code'))
+  assert.ok(!html.includes('Copy all code'))
   assert.ok(html.includes('Raw submission data'))
 })
 
