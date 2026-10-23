@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\WcOrder;
 use App\Models\WebsiteDocumentProfile;
+use App\Support\TrustpilotReviewLink;
 use Illuminate\Validation\ValidationException;
 
 class BrandedDocumentRenderer
@@ -117,8 +118,22 @@ class BrandedDocumentRenderer
             $support .= '<br><a href="'.e($profile->website_url).'" style="color:'.$c['text'].';text-decoration:underline">'.e($profile->website_url).'</a>';
         }
         $optional = trim($rendered['optional_block'] ?? '') === '' ? '' : '<div style="margin-top:24px;font-size:14px;line-height:1.6">'.nl2br(e($rendered['optional_block'])).'</div>';
-        $html = '<!doctype html><html lang="'.$language.'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:'.$c['background'].';color:'.$c['text'].';font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">'.e($rendered['preheader']).'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:'.$c['background'].'"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-top:5px solid '.$c['primary'].'"><tr><td style="padding:28px 24px">'.$logo.'<div style="font-size:18px;font-weight:bold;color:'.$c['primary'].'">'.e($vars['brand_name']).'</div><h1 style="font-size:27px;line-height:1.3;margin:24px 0 8px">'.e($rendered['heading']).'</h1><p style="font-size:13px;margin:0 0 24px">'.($language === 'fr' ? 'Commande ' : 'Order ').e($vars['order_number']).'</p><div style="padding:18px;background:'.$c['background'].';border-left:3px solid '.$c['accent'].';font-size:15px;line-height:1.6"><strong>'.e($attachmentLabel).'</strong>'.$fileList.'</div><div style="font-size:16px;line-height:1.7;margin-top:24px">'.nl2br(e($rendered['body'])).'</div>'.$optional.'<div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:20px;font-size:13px;line-height:1.6">'.nl2br(e($footer)).'<p style="margin:12px 0 0">'.$support.'</p></div></td></tr></table></td></tr></table></body></html>';
-        $text = implode("\n\n", array_filter([$vars['brand_name'], $rendered['heading'], ($language === 'fr' ? 'Commande ' : 'Order ').$vars['order_number'], $attachmentLabel, implode("\n", $names), $rendered['body'], $rendered['optional_block'] ?? '', $footer, $profile->support_email, $profile->support_phone, $profile->website_url]));
+        // Invite feedback after document delivery, using only this website's saved
+        // profile. The rendered HTML/text are frozen in the reviewed send snapshot.
+        $reviewUrl = $template !== 'acknowledgement' && $names !== [] ? TrustpilotReviewLink::actionUrl($profile) : null;
+        $reviewHtml = '';
+        $reviewText = '';
+        if ($reviewUrl) {
+            $reviewHeading = $language === 'fr' ? 'Votre expérience compte' : 'Your experience matters';
+            $reviewBody = $language === 'fr'
+                ? 'Partagez votre expérience avec '.$vars['brand_name'].' sur Trustpilot. Votre avis aide les autres voyageurs.'
+                : 'Share your experience with '.$vars['brand_name'].' on Trustpilot. Your feedback helps other travellers.';
+            $reviewButton = $language === 'fr' ? 'Donner mon avis sur Trustpilot' : 'Review us on Trustpilot';
+            $reviewHtml = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #e2e8f0;background:#f8fafc"><tr><td style="padding:20px"><h2 style="margin:0 0 8px;font-size:18px;line-height:1.4;color:#18212f">'.e($reviewHeading).'</h2><p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#334155">'.e($reviewBody).'</p><table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="'.$c['primary'].'" style="background:'.$c['primary'].';border-radius:6px"><a href="'.e($reviewUrl).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:13px 18px;border:1px solid '.$c['primary'].';border-radius:6px;font-size:14px;font-weight:bold;line-height:1.4;color:#ffffff;text-decoration:none">'.e($reviewButton).'</a></td></tr></table></td></tr></table>';
+            $reviewText = $reviewHeading."\n".$reviewBody."\n".$reviewButton.': '.$reviewUrl;
+        }
+        $html = '<!doctype html><html lang="'.$language.'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:'.$c['background'].';color:'.$c['text'].';font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">'.e($rendered['preheader']).'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:'.$c['background'].'"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-top:5px solid '.$c['primary'].'"><tr><td style="padding:28px 24px">'.$logo.'<div style="font-size:18px;font-weight:bold;color:'.$c['primary'].'">'.e($vars['brand_name']).'</div><h1 style="font-size:27px;line-height:1.3;margin:24px 0 8px">'.e($rendered['heading']).'</h1><p style="font-size:13px;margin:0 0 24px">'.($language === 'fr' ? 'Commande ' : 'Order ').e($vars['order_number']).'</p><div style="padding:18px;background:'.$c['background'].';border-left:3px solid '.$c['accent'].';font-size:15px;line-height:1.6"><strong>'.e($attachmentLabel).'</strong>'.$fileList.'</div><div style="font-size:16px;line-height:1.7;margin-top:24px">'.nl2br(e($rendered['body'])).'</div>'.$optional.$reviewHtml.'<div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:20px;font-size:13px;line-height:1.6">'.nl2br(e($footer)).'<p style="margin:12px 0 0">'.$support.'</p></div></td></tr></table></td></tr></table></body></html>';
+        $text = implode("\n\n", array_filter([$vars['brand_name'], $rendered['heading'], ($language === 'fr' ? 'Commande ' : 'Order ').$vars['order_number'], $attachmentLabel, implode("\n", $names), $rendered['body'], $rendered['optional_block'] ?? '', $reviewText, $footer, $profile->support_email, $profile->support_phone, $profile->website_url]));
 
         return compact('subject', 'html', 'text', 'language');
     }

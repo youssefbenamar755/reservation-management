@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DocumentEmailPreview from '@/components/DocumentEmailPreview.vue';
+import TrustpilotReviewSettings from '@/components/TrustpilotReviewSettings.vue';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/AppLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
@@ -54,6 +55,7 @@ const testUnconfirmed = ref(false);
 const activationConfirmed = ref(false);
 const storeBrandingConfirmed = ref(false);
 const busy = ref('');
+const reviewSaving = ref(false);
 const errors = ref<string[]>([]);
 const notice = ref('');
 const preview = shallowRef<{
@@ -197,7 +199,7 @@ async function run(
     callback: (signal: AbortSignal) => Promise<void>,
     fallback: string,
 ) {
-    if (busy.value || disposed || !selected.value) return;
+    if (busy.value || reviewSaving.value || disposed || !selected.value) return;
     busy.value = action;
     errors.value = [];
     notice.value = '';
@@ -228,13 +230,15 @@ async function save(enabled?: boolean) {
     )
         return;
     const id = selected.value.id;
+    const profile = { ...draft.value };
+    delete profile.trustpilot_url;
     await run(
         'save',
         async (signal) => {
             const { data } = await axios.put(
                 `/settings/email-documents/${id}`,
                 {
-                    ...draft.value,
+                    ...profile,
                     workflow_enabled: enabled ?? draft.value?.workflow_enabled,
                 },
                 {
@@ -260,6 +264,22 @@ async function save(enabled?: boolean) {
         },
         'The website configuration could not be saved. Your changes remain in this form.',
     );
+}
+function reviewLinkSaved(value: {
+    websiteId: number;
+    trustpilotUrl: string | null;
+}) {
+    const site = websites.value.find((item) => item.id === value.websiteId);
+    if (!site) return;
+    // Keep the same website object so the selection watcher cannot reset other edits.
+    site.profile.trustpilot_url = value.trustpilotUrl;
+    if (selectedId.value === value.websiteId && draft.value) {
+        draft.value.trustpilot_url = value.trustpilotUrl;
+        const saved = JSON.parse(baseline.value) as DocumentBrandProfile;
+        saved.trustpilot_url = value.trustpilotUrl;
+        baseline.value = JSON.stringify(saved);
+        if (preview.value) previewStale.value = true;
+    }
 }
 async function disableWorkflow() {
     if (!selected.value?.profile.workflow_enabled) return;
@@ -756,7 +776,7 @@ onUnmounted(() => {
                         {{ notice }}
                     </p>
                     <fieldset
-                        :disabled="!!busy"
+                        :disabled="!!busy || reviewSaving"
                         class="min-w-0 space-y-5 disabled:opacity-70"
                     >
                         <template v-if="tab === 'brand'">
@@ -1400,6 +1420,15 @@ onUnmounted(() => {
                             </div>
                         </template>
                     </fieldset>
+                    <TrustpilotReviewSettings
+                        v-show="tab === 'brand'"
+                        :website-id="selected.id"
+                        :profile-id="selected.profile.id"
+                        :trustpilot-url="selected.profile.trustpilot_url"
+                        :disabled="!!busy"
+                        @saving="reviewSaving = $event"
+                        @saved="reviewLinkSaved"
+                    />
                     <footer
                         class="flex flex-wrap items-center justify-between gap-3 border-t pt-4"
                     >
@@ -1410,7 +1439,9 @@ onUnmounted(() => {
                                     : 'Saving a draft does not activate this workflow or change store notifications.'
                             }}
                         </p>
-                        <Button :disabled="!!busy || !dirty" @click="save()"
+                        <Button
+                            :disabled="!!busy || reviewSaving || !dirty"
+                            @click="save()"
                             ><Loader2
                                 v-if="busy === 'save'"
                                 class="size-4 animate-spin"

@@ -11,6 +11,7 @@ use App\Services\BrandedDocumentRenderer;
 use App\Services\DocumentStoreGateway;
 use App\Services\GmailClient;
 use App\Services\WebsiteDocumentProfiles;
+use App\Support\TrustpilotReviewLink;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -21,6 +22,44 @@ use Inertia\Inertia;
 
 class DocumentSettingsController extends Controller
 {
+    /** Review links affect future email content, not store completion configuration. */
+    public function reviewLink(Request $request, Website $website)
+    {
+        $this->authorize('update', $website);
+        $data = $request->validate([
+            'trustpilot_url' => ['present', 'nullable', 'string', 'max:1000'],
+            'expected_trustpilot_url' => ['present', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $url = DB::transaction(function () use ($request, $website, $data) {
+            $lockedWebsite = Website::whereKey($website->id)->lockForUpdate()->firstOrFail();
+            $this->authorize('update', $lockedWebsite);
+            $profile = WebsiteDocumentProfile::where('website_id', $lockedWebsite->id)->lockForUpdate()->first();
+            if (! $profile) {
+                throw ValidationException::withMessages(['trustpilot_url' => 'Save this website’s document profile before adding a Trustpilot link.']);
+            }
+            abort_if($profile->trustpilot_url !== $data['expected_trustpilot_url'], 409,
+                'The Trustpilot link changed in another session. Reload before saving.');
+
+            $url = TrustpilotReviewLink::normalize($data['trustpilot_url'], $lockedWebsite->base_url);
+            if (filled($data['trustpilot_url']) && $url === null) {
+                throw ValidationException::withMessages(['trustpilot_url' => 'Use this website’s HTTPS Trustpilot review link without query parameters or fragments.']);
+            }
+            if ($profile->trustpilot_url !== $url) {
+                $profile->update(['trustpilot_url' => $url]);
+                ActionHistoryEvent::create(['actor_id' => $request->user()->id, 'website_id' => $lockedWebsite->id,
+                    'kind' => 'document_profile', 'entity_key' => (string) $profile->id, 'reference' => $lockedWebsite->name,
+                    'outcome' => 'succeeded', 'occurred_at' => now(), 'finished_at' => now(),
+                    'details' => ['review_link_updated' => true]]);
+            }
+
+            return $url;
+        }, 3);
+
+        return response()->json(['website_id' => $website->id, 'trustpilot_url' => $url])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     /** Stop new work even when the saved sender, account assignment or templates are invalid. */
     public function disable(Request $request, Website $website)
     {

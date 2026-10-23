@@ -19,6 +19,7 @@ export interface DocumentBrandProfile {
     website_url: string;
     support_phone: string;
     footer: string;
+    trustpilot_url?: string | null;
     gmail_connection_id: number | null;
     sender_email: string;
     sender_name: string;

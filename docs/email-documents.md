@@ -63,6 +63,14 @@ Settings previews use fictional Alex / DEMO order data, zero/one/multiple sample
 
 For isolated validation, enable `WPHUB_VALIDATION_MODE` only in a fresh local/testing/staging environment and explicitly list fictional or approved test recipients in `WPHUB_VALIDATION_RECIPIENTS`. The default validation transport is private local `.eml` capture. Capture references are labelled as capture, not Gmail acceptance; stored fixture aliases are not real Google verification. Gmail transport additionally requires explicit recipient approval and its environment allowlist. Validation blocks unapproved outgoing HTTP destinations, non-document queued jobs, Laravel mail delivery and incoming API callbacks. These controls supplement a fresh database, isolated storage and removal of production credentials; they do not make a copied production environment safe.
 
+### Trustpilot review invitations
+
+Each saved website profile has an optional `trustpilot_url`, managed separately in **Brand identity → Trustpilot reviews**. Paste the website's own Trustpilot profile link; HTTPS Trustpilot review/evaluation URLs are normalized and their domain must match the registered website, not the editable email signature URL. An empty value omits the invitation.
+
+Delivery and correction emails with PDFs include a neutral French/English button and a plain-text link to the matching review form. The same renderer handles settings previews, test emails and real document preparations. Acknowledgements, legacy email composition and marketing templates are unchanged.
+
+`PATCH /settings/email-documents/{website}/review-link` requires website-update authorization and the expected current URL. It records the update in action history, rejects stale changes, and preserves `config_version`, `brand_sync_version`, pairing and workflow activation. Normal profile saves ignore this separately managed field. Already prepared HTML/text/MIME remain the exact reviewed snapshot; only new preparations use the updated link. Deploy the additive nullable-column migration before configuring links. No store companion publication or customer email is triggered by saving the link.
+
 ## Reliability and security
 
 Preview creates an encrypted immutable recipient/sender/template/attachment snapshot and MIME message. Keys include website and internal order IDs. Per-order database locks and a unique deduplication key prevent competing sends, including different operators and competing previews of the same document set. Approval and document metadata are rechecked at send time; the outgoing bytes remain the exact reviewed MIME bytes. Provider calls are never blindly retried.

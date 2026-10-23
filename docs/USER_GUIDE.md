@@ -175,6 +175,15 @@ This workflow sends individual order documents. Marketing campaigns use the sepa
 
 Saved previews expire after 24 hours. Sent attachment snapshots are removed; keep your original booking files in your normal document storage. For a failed send, inspect the error before explicitly retrying. For an uncertain send, check Gmail Sent first to avoid sending a duplicate.
 
+### Add a Trustpilot review link to branded document emails
+
+1. Open [Settings → Email & Documents](/settings/email-documents), select the website, and open **Brand identity**.
+2. In **Trustpilot review link (optional)**, paste that website's own Trustpilot profile URL and choose **Save review link**. The profile domain must match the registered website. Leave it blank if no profile is confirmed.
+3. Open **Templates & preview** and preview **Document delivery** or **Corrected documents** with at least one sample PDF. Check both French and English.
+4. Newly prepared branded document emails include a review button and a plain-text link. The button opens Trustpilot's review form for that website. Acknowledgements and the legacy email composer are unchanged.
+
+The review link saves separately from brand and sender settings. It does not activate a website, change completion readiness, send an email, or alter a previously prepared message. To remove it from future messages, clear the field and save the review link.
+
 ## Email open tracking
 
 Open tracking is optional for document emails and applies only when enabled before preparing that email.
